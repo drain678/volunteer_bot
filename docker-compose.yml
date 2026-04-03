@@ -96,33 +96,33 @@ services:
   #     - minio-data:/data
   #   command: server --console-address ":9001" /data
 
-  celery_worker:
-    build:
-      context: .
-    command: celery -A script.calculate_ratings worker --loglevel=info
-    depends_on:
-      redis:
-        condition: service_healthy
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - .:/code
+  # celery_worker:
+  #   build:
+  #     context: .
+  #   command: celery -A script.calculate_ratings worker --loglevel=info
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     db:
+  #       condition: service_healthy
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   volumes:
+  #     - .:/code
 
-  celery_beat:
-    build:
-      context: .
-    command: celery -A script.calculate_ratings beat --loglevel=info
-    depends_on:
-      redis:
-        condition: service_healthy
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - .:/code
+  # celery_beat:
+  #   build:
+  #     context: .
+  #   command: celery -A script.calculate_ratings beat --loglevel=info
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     db:
+  #       condition: service_healthy
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   volumes:
+  #     - .:/code
 
 volumes:
   database-data:

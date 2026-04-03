@@ -25,22 +25,22 @@ def get_logger(name: str = "backend_logger"):
 #     LOGGING_CONFIG = yaml.full_load(f)
 
 
-# class ConsoleFormatter(logging.Formatter):
-#     LEVEL_COLORS = {
-#         "DEBUG": Fore.BLUE,
-#         "INFO": Fore.GREEN,
-#         "WARNING": Fore.YELLOW,
-#         "ERROR": Fore.RED,
-#         "CRITICAL": Fore.MAGENTA + Style.BRIGHT,
-#     }
+class ConsoleFormatter(logging.Formatter):
+    LEVEL_COLORS = {
+        "DEBUG": Fore.BLUE,
+        "INFO": Fore.GREEN,
+        "WARNING": Fore.YELLOW,
+        "ERROR": Fore.RED,
+        "CRITICAL": Fore.MAGENTA + Style.BRIGHT,
+    }
 
-#     def format(self, record: logging.LogRecord) -> str:
-#         record.correlation_id = correlation_id_context.get()
-#         log_color = self.LEVEL_COLORS.get(record.levelname, "")
-#         reset = Style.RESET_ALL
-#         record.levelname = f"{log_color}{record.levelname}{reset}"
+    def format(self, record: logging.LogRecord) -> str:
+        record.correlation_id = correlation_id_context.get()
+        log_color = self.LEVEL_COLORS.get(record.levelname, "")
+        reset = Style.RESET_ALL
+        record.levelname = f"{log_color}{record.levelname}{reset}"
 
-#         return super().format(record)
+        return super().format(record)
     
 
 # def setup_logging():

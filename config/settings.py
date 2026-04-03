@@ -44,13 +44,13 @@ class Settings(BaseSettings):
     # def minio_url(self) -> str:
     #     return f"http://{self.MINIO_ENDPOINT}/{self.MINIO_BUCKET}"
 
-    @property
-    def celery_broker_url(self) -> str:
-        return self.CELERY_BROKER_URL or self.rabbit_url
+    # @property
+    # def celery_broker_url(self) -> str:
+    #     return self.CELERY_BROKER_URL or self.rabbit_url
 
-    @property
-    def celery_result_backend(self) -> str:
-        return self.CELERY_RESULT_BACKEND or self.redis_url
+    # @property
+    # def celery_result_backend(self) -> str:
+    #     return self.CELERY_RESULT_BACKEND or self.redis_url
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
