@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "volunteer-bot"
+version = "0.1.0"
+description = ""
+authors = ["drain678 <ekaterina1.zorina@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aiogram = "^3.19.0"
+pydantic-settings = "^2.8.1"
+fastapi = "^0.115.12"
+sqlalchemy = "^2.0.40"
+asyncpg = "^0.30.0"
+aio-pika = "^9.5.5"
+msgpack = "^1.1.0"
+uvicorn = "^0.34.0"
+alembic = "^1.15.2"
+pyyaml = "^6.0.2"
+colorama = "^0.4.6"
+prometheus-client = "^0.21.1"
+celery = {extras = ["asyncio"], version = "^5.5.1"}
+redis = "^5.2.1"
+pytest = "^8.3.5"
+pytest-asyncio = "^0.26.0"
+aiohttp = "^3.11.18"
+httpx = "^0.28.1"
+asgi-lifespan = "^2.1.0"
+asgiref = "^3.8.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

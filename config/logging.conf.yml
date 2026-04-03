@@ -1,0 +1,22 @@
+version: 1
+disable_existing_loggers: no
+formatters:
+  console_formatter:
+    (): src.logger.ConsoleFormatter
+    format: "%(levelname)-8s | [%(name)s] | [%(correlation_id)s] | %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+handlers:
+  console_handler:
+    class: logging.StreamHandler
+    formatter: console_formatter
+
+loggers:
+  backend_logger:
+    level: INFO
+    propagate: no
+    handlers: [console_handler]
+
+root:
+  level: INFO
+  handlers: [console_handler]
