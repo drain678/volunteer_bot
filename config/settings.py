@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = None
     CELERY_RESULT_BACKEND: str = None
 
-    USER_QUEUE: str = "user_receipts.{user_id}"
+    USER_QUEUE: str = "user.response.{user_id}"
 
     @property
     def db_url(self) -> str:
