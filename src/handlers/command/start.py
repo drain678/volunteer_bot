@@ -1,54 +1,47 @@
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from src.handlers.command.router import router
-from src.templates.env import render
-# from src.keyboards import volunteer_menu
-from storage.db import get_db
-from src.handlers.callback.get_profile import get_profile
-from sqlalchemy import select
 from src.models.models import User
+from src.storage.db import async_session
+from src.templates.env import render
 
 
 @router.message(Command("start"))
-async def start(message: Message, state: FSMContext, db: AsyncSession):
+async def start(message: Message, state: FSMContext) -> None:
     await state.clear()
 
-    result = await db.execute(
-        select(User).where(User.telegram_id == message.from_user.id)
-    )
-    user = result.scalar_one_or_none()
+    async with async_session() as db:
+        result = await db.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )
+        user = result.scalar_one_or_none()
 
     if user:
         if user.role == "volunteer":
-            await message.answer(
-                "Ты уже зарегистрирован как волонтёр",
-                # reply_markup=volunteer_menu(),
-            )
-            return
+            ans = "Ты уже зарегистрирован как волонтёр"
         elif user.role == "organizer":
-            await message.answer(
-                "Ты уже зарегистрирован как организатор",
-                # reply_markup=volunteer_menu(),
-            )
-            return
+            ans = "Ты уже зарегистрирован как организатор"
         else:
-            await message.answer(
-                "Ты уже зарегистрирован как администратор",
-                # reply_markup=volunteer_menu(),
-            )
-            return
-
-    keyboard = [
+            ans = "Ты уже зарегистрирован как администратор"
+    else:
+        ans = "Давай зарегистрируемся, кем ты будешь?"
+        keyboard = [
         [InlineKeyboardButton(text="Я волонтёр", callback_data="role_volunteer")],
         [InlineKeyboardButton(text="Я организатор", callback_data="role_organizer")],
-    ]
+        ]
 
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    if keyboard:
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    else:
+        reply_markup = None
 
     await message.answer(
         render("start.jinja2", user=message.from_user),
-        reply_markup=reply_markup,
+        # reply_markup=reply_markup,
     )
+
+    if ans:
+        await message.answer(ans, reply_markup=reply_markup)

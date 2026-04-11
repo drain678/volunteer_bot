@@ -9,40 +9,44 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.settings import settings
 from src.handlers.callback.router import router
-from src.logger import LOGGING_CONFIG, logger
+# from src.logger import LOGGING_CONFIG, get_logger
 from src.storage.rabbit import channel_pool
 from src.templates.env import render
 
+# logger = get_logger()
 
 @router.callback_query(lambda c: c.data == "profile")
 async def get_profile(callback: CallbackQuery) -> None:
-    logging.config.dictConfig(LOGGING_CONFIG)
+    # logging.config.dictConfig(LOGGING_CONFIG)
 
     user_id = callback.from_user.id
 
     async with channel_pool.acquire() as channel:
         exchange = await channel.declare_exchange(
-            "user", ExchangeType.TOPIC, durable=True
+            "user_form", ExchangeType.TOPIC, durable=True
         )
 
-        queue = await channel.declare_queue(
+        queue = await channel.declare_queue("user_messages", durable=True)
+
+        user_queue = await channel.declare_queue(
             settings.USER_QUEUE.format(user_id=user_id),
-            durable=True,
+            durable=True
         )
 
-        await queue.bind(exchange, settings.USER_QUEUE.format(user_id=user_id))
+        await queue.bind(exchange, 'user_messages')
+        await user_queue.bind(exchange, settings.USER_QUEUE.format(user_id=user_id))
 
         body = {"id": user_id, "action": "get_profile"}
 
         await exchange.publish(
             aio_pika.Message(msgpack.packb(body)),
-            routing_key="user.get_profile",
+            "user_messages"
         )
 
         # ждём ответ
         for _ in range(3):
             try:
-                res = await queue.get()
+                res = await user_queue.get()
                 await res.ack()
 
                 profile = msgpack.unpackb(res.body)

@@ -3,7 +3,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     BOT_TOKEN: str
-    BOT_WEBHOOK_URL: str
+    BOT_WEBHOOK_URL: str = ""
+
+    @property
+    def use_telegram_webhook(self) -> bool:
+        return bool(self.BOT_WEBHOOK_URL.strip())
 
     RABBIT_HOST: str
     RABBIT_PORT: int

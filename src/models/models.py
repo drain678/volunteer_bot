@@ -11,11 +11,13 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    chat_id: Mapped[int] = mapped_column(unique=True, index=True)
+    telegram_id: Mapped[int] = mapped_column(unique=True, index=True)
 
     name: Mapped[str] = mapped_column(nullable=True)
     age: Mapped[int] = mapped_column(nullable=False)
     city: Mapped[str] = mapped_column(nullable=True)
+
+    profile_filled: Mapped[bool] = mapped_column(default=False)
 
     # volunteer / organizer / admin
     role: Mapped[str] = mapped_column(default="volunteer")
@@ -24,6 +26,18 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     participations = relationship("Participation", back_populates="user")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "age": str(self.age),
+            "city": self.city,
+            "profile_filled": self.profile_filled,
+            "role": self.role,
+            "is_blocked": self.is_blocked,
+            "created_at": self.created_at.isoformat(),
+        }
 
 
 class Organization(Base):

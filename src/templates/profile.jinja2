@@ -1,0 +1,7 @@
+<b>Профиль</b>
+
+👤 Имя: {{ user.name }}
+🎂 Возраст: {{ user.age }}
+📍 Город: {{ user.city }}
+
+Роль: {% if user.role == "volunteer" %}волонтёр{% elif user.role == "organizer" %}организатор{% elif user.role == "admin" %}администратор{% else %}{{ user.role }}{% endif %}

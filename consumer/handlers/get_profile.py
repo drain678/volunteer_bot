@@ -36,7 +36,7 @@ async def get_profile(body: Dict[str, Any]) -> None:
 
     async with rabbit.channel_pool.acquire() as channel:
         exchange = await channel.declare_exchange(
-            "user", ExchangeType.TOPIC, durable=True
+            "user_form", ExchangeType.TOPIC, durable=True
         )
 
         await exchange.publish(
