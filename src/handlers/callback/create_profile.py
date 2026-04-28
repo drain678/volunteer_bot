@@ -3,6 +3,7 @@ import asyncio
 import aio_pika
 import msgpack
 import logging.config
+import re
 from aio_pika import ExchangeType
 from aio_pika.exceptions import QueueEmpty
 from aiogram.filters import StateFilter
@@ -25,6 +26,7 @@ def _profile_text(profile: dict) -> str:
         f"👤 Имя: {profile.get('name')}\n"
         f"🎂 Возраст: {profile.get('age')}\n"
         f"📍 Город: {profile.get('city')}\n"
+        f"📞 Телефон: {profile.get('phone')}\n"
         f"⚧ Пол: {gender_text}\n"
     )
 
@@ -32,7 +34,7 @@ def _profile_text(profile: dict) -> str:
 @router.callback_query(lambda c: c.data in {"role_volunteer"})
 async def create_profile(callback: CallbackQuery, state: FSMContext) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
-    logger.info("СОЗДАНИЕ ПРОФИЛЯ ВОЛОНТЕРА")
+    logger.info("СОЗДАНИЕ ПРОФИЛЯ ВОЛОНТЕРА", extra={"body": callback.from_user.id})
 
     await state.set_state(VolunteerProfileState.name)
     await state.update_data(role="volunteer")
@@ -77,6 +79,18 @@ async def volunteer_city(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(city=city)
+    await state.set_state(VolunteerProfileState.phone)
+    await message.answer("Номер телефона?")
+
+
+@router.message(VolunteerProfileState.phone)
+async def volunteer_phone(message: Message, state: FSMContext) -> None:
+    phone = (message.text or "").strip()
+    if not re.fullmatch(r"^\+?\d{11}$", phone):
+        await message.answer("Телефон должен быть в формате 11 цифр или + и 11 цифр.")
+        return
+
+    await state.update_data(phone=phone)
     await state.set_state(VolunteerProfileState.gender)
 
     keyboard = InlineKeyboardMarkup(
@@ -103,6 +117,7 @@ async def volunteer_gender(callback: CallbackQuery, state: FSMContext) -> None:
         "name": profile_data.get("name"),
         "age": profile_data.get("age"),
         "city": profile_data.get("city"),
+        "phone": profile_data.get("phone"),
         "gender": gender,
     }
 
@@ -125,13 +140,11 @@ async def volunteer_gender(callback: CallbackQuery, state: FSMContext) -> None:
             aio_pika.Message(msgpack.packb(body)),
             routing_key="user_messages",
         )
-        logger.info("ОТПРАВИЛИ ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ ВОЛОНТЕРА ЧЕРЕЗ ОЧЕРЕДЬ")
+        logger.info("ОТПРАВИЛИ ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ ВОЛОНТЕРА В БД", extra={"body": callback.from_user.id})
 
-        for _ in range(5):
-            logger.info("ЖДЁМ ОТВЕТ ОТ CONSUMER")
+        for _ in range(10):
             try:
                 res = await user_queue.get(timeout=3)
-                logger.info(f"ОТВЕТ {res}")
                 await res.ack()
                 result = msgpack.unpackb(res.body)
 
@@ -141,7 +154,6 @@ async def volunteer_gender(callback: CallbackQuery, state: FSMContext) -> None:
                     return
 
                 await callback.message.answer("Профиль успешно создан!")
-                logger.info("ПРОФИЛЬ ВОЛОНТЕРА СОЗДАН")
                 await callback.message.answer(_profile_text(result))
                 await callback.message.answer(
                     "Меню бота:", reply_markup=build_menu_by_role("volunteer")
@@ -150,7 +162,7 @@ async def volunteer_gender(callback: CallbackQuery, state: FSMContext) -> None:
                 await callback.answer()
                 return
             except QueueEmpty:
-                logger.info("ОТВЕТ ОТ CONSUMER НЕ ПОЛУЧЕН (ТАЙМАУТ)")
+                logger.info("ОТВЕТ ОТ БД НЕ ПОЛУЧЕН, ОЧЕРЕДЬ ПУСТА", extra={"body": callback.from_user.id})
                 await asyncio.sleep(1)
 
     await callback.message.answer("Не удалось создать профиль пон ")

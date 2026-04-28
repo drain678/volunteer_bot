@@ -17,6 +17,7 @@ class User(Base):
     age: Mapped[int] = mapped_column(nullable=False)
     gender: Mapped[str] = mapped_column(nullable=True)
     city: Mapped[str] = mapped_column(nullable=True)
+    phone: Mapped[str] = mapped_column(nullable=True)
 
     profile_filled: Mapped[bool] = mapped_column(default=False)
 
@@ -35,6 +36,7 @@ class User(Base):
             "age": str(self.age),
             "gender": self.gender,
             "city": self.city,
+            "phone": self.phone,
             "profile_filled": self.profile_filled,
             "role": self.role,
             "is_blocked": self.is_blocked,

@@ -3,6 +3,7 @@ import asyncio
 import aio_pika
 import msgpack
 import logging.config
+import re
 from aio_pika import ExchangeType
 from aio_pika.exceptions import QueueEmpty
 from aiogram.filters import StateFilter
@@ -25,6 +26,7 @@ def _organization_profile_text(profile: dict) -> str:
 
     return (
         "<b>Профиль организации</b>\n\n"
+        f"🏢 Название: {profile.get('organization_name')}\n"
         f"👤 Представитель: {profile.get('representative_name')}\n"
         f"📞 Телефон: {profile.get('representative_phone')}\n"
         f"{site_line}\n"
@@ -35,11 +37,23 @@ def _organization_profile_text(profile: dict) -> str:
 @router.callback_query(lambda c: c.data in {"role_organizer"})
 async def create_organization(callback: CallbackQuery, state: FSMContext) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
-    logger.info("СОЗДАНИЕ ПРОФИЛЯ ОРГАНИЗАЦИИ")
-    await state.set_state(OrganizationProfileState.representative_name)
+    logger.info("СОЗДАНИЕ ПРОФИЛЯ ОРГАНИЗАЦИИ", extra={"body": callback.from_user.id})
+    await state.set_state(OrganizationProfileState.organization_name)
     await state.update_data(role="organizer")
-    await callback.message.answer("Имя представителя организации?")
+    await callback.message.answer("Название организации?")
     await callback.answer()
+
+
+@router.message(OrganizationProfileState.organization_name)
+async def organization_name(message: Message, state: FSMContext) -> None:
+    organization_name = (message.text or "").strip()
+    if not organization_name:
+        await message.answer("Название организации не должно быть пустым. Введи снова.")
+        return
+
+    await state.update_data(organization_name=organization_name)
+    await state.set_state(OrganizationProfileState.representative_name)
+    await message.answer("Имя представителя организации?")
 
 
 @router.message(OrganizationProfileState.representative_name)
@@ -57,8 +71,8 @@ async def organization_representative_name(message: Message, state: FSMContext) 
 @router.message(OrganizationProfileState.representative_phone)
 async def organization_representative_phone(message: Message, state: FSMContext) -> None:
     representative_phone = (message.text or "").strip()
-    if not representative_phone:
-        await message.answer("Телефон не должен быть пустым. Введи снова.")
+    if not re.fullmatch(r"^\+?\d{11}$", representative_phone):
+        await message.answer("Телефон должен быть в формате 11 цифр или + и 11 цифр.")
         return
 
     await state.update_data(representative_phone=representative_phone)
@@ -90,6 +104,7 @@ async def organization_description(message: Message, state: FSMContext) -> None:
         "action": "make_organization_form",
         "id": message.from_user.id,
         "role": "organizer",
+        "organization_name": profile_data.get("organization_name"),
         "representative_name": profile_data.get("representative_name"),
         "representative_phone": profile_data.get("representative_phone"),
         "website": profile_data.get("website"),
@@ -113,10 +128,11 @@ async def organization_description(message: Message, state: FSMContext) -> None:
             aio_pika.Message(msgpack.packb(body)),
             routing_key="user_messages",
         )
+        logger.info("ОТПРАВИЛИ ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ ОРГАНИЗАЦИИ В БД", extra={"body": message.from_user.id})
 
-        for _ in range(3):
+        for _ in range(10):
             try:
-                res = await user_queue.get()
+                res = await user_queue.get(timeout=3)
                 await res.ack()
                 result = msgpack.unpackb(res.body)
                 if "error" in result:
@@ -124,7 +140,6 @@ async def organization_description(message: Message, state: FSMContext) -> None:
                     return
 
                 await message.answer("Профиль успешно создан!")
-                logger.info("ПРОФИЛЬ ОРГАНИЗАЦИИ СОЗДАН")
                 await message.answer(_organization_profile_text(result))
                 await message.answer(
                     "Меню бота:", reply_markup=build_menu_by_role("organizer")
@@ -132,7 +147,7 @@ async def organization_description(message: Message, state: FSMContext) -> None:
                 await state.clear()
                 return
             except QueueEmpty:
-                logger.info("ОШИБКА ПРИ СОЗДАНИИ ПРОФИЛЯ ОРГАНИЗАЦИИ")
+                logger.info("ОТВЕТ ОТ БД НЕ ПОЛУЧЕН, ОЧЕРЕДЬ ПУСТА", extra={"body": message.from_user.id})
                 await asyncio.sleep(1)
 
     await message.answer("Не удалось создать профиль. Попробуй позже.")

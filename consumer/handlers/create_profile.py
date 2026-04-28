@@ -16,12 +16,13 @@ from src.models.models import User
 
 async def create_profile(body: Dict[str, Any]) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
-    logger.info("ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ ВОЛОНТЕРА")
+    logger.info("ПОЛУЧИЛИ ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ К БД", extra={"body": body.get("id")})
 
     user_id = int(body.get("id"))
     role = "volunteer"
     name = (body.get("name") or "").strip()
     city = (body.get("city") or "").strip()
+    phone = (body.get("phone") or "").strip()
     gender = body.get("gender")
 
     try:
@@ -29,12 +30,11 @@ async def create_profile(body: Dict[str, Any]) -> None:
     except (TypeError, ValueError):
         age = None
 
-    if not name or not city or gender not in {"f", "m"} or age is None:
+    if not name or not city or not phone or gender not in {"f", "m"} or age is None:
         response_body = {"error": "invalid_profile_data"}
     else:
         try:
             async with async_session() as db:
-                logger.info("ЗАПРОС НА К БД")
                 result = await db.execute(
                     select(User).where(User.telegram_id == user_id)
                 )
@@ -48,6 +48,7 @@ async def create_profile(body: Dict[str, Any]) -> None:
                         age=age,
                         gender=gender,
                         city=city,
+                        phone=phone,
                         profile_filled=True,
                     )
                     db.add(user)
@@ -57,9 +58,11 @@ async def create_profile(body: Dict[str, Any]) -> None:
                     user.age = age
                     user.gender = gender
                     user.city = city
+                    user.phone = phone
                     user.profile_filled = True
 
                 await db.commit()
+                logger.info("БД СДЕЛАЛО ПРОФИЛЬ ВОЛОНТЕРА", extra={"body": body.get("id")})
                 response_body = {
                     "id": user.id,
                     "telegram_id": user.telegram_id,
@@ -67,10 +70,11 @@ async def create_profile(body: Dict[str, Any]) -> None:
                     "name": user.name,
                     "age": user.age,
                     "city": user.city,
+                    "phone": user.phone,
                     "gender": gender,
                 }
         except SQLAlchemyError:
-            logger.exception("ОШИБКА ПРИ СОЗДАНИИ ПРОФИЛЯ ВОЛОНТЕРА")
+            logger.exception("ОШИБКА ПРИ СОЗДАНИИ ПРОФИЛЯ ВОЛОНТЕРА", extra={"body": body.get("id")})
             response_body = {"error": "db_error"}
 
             
@@ -90,7 +94,4 @@ async def create_profile(body: Dict[str, Any]) -> None:
             routing_key=settings.USER_QUEUE.format(user_id=user_id),
         )
 
-    logger.info(
-        "БД СДЕЛАЛО ПРОФИЛЬ ВОЛОНТЕРА",
-        extra={"response": response_body},
-    )
+    

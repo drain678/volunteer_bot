@@ -19,7 +19,7 @@ from src.templates.env import render
 @router.callback_query(lambda c: c.data == "profile")
 async def get_profile(callback: CallbackQuery, state: FSMContext) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
-    logger.info("ПОЛУЧЕН ЗАПРОС НА ПРОФИЛЬ ИЗ SRC", extra={"body": callback.from_user.id})
+    logger.info("ПОЛУЧЕН ЗАПРОС НА ПРОФИЛЬ ВОЛОНТЕРА", extra={"body": callback.from_user.id})
     user_id = callback.from_user.id
     profile = None
     async with channel_pool.acquire() as channel:
@@ -35,7 +35,7 @@ async def get_profile(callback: CallbackQuery, state: FSMContext) -> None:
 
         body = {"id": user_id, "action": "get_profile"}
         await exchange.publish(aio_pika.Message(msgpack.packb(body)), routing_key="user_messages")
-        logger.info("ОТПРАВИЛИ ЗАПРОС НА ПРОФИЛЬ ИЗ SRC ЧЕРЕЗ ОЧЕРЕДЬ")
+        logger.info("ОТПРАВИЛИ ЗАПРОС НА ПРОФИЛЬ В БД", extra={"body": callback.from_user.id})
 
         for _ in range(10):
             try:
@@ -44,6 +44,7 @@ async def get_profile(callback: CallbackQuery, state: FSMContext) -> None:
                 profile = msgpack.unpackb(res.body)
                 break
             except QueueEmpty:
+                logger.info("ОТВЕТ ОТ БД НЕ ПОЛУЧЕН, ОЧЕРЕДЬ ПУСТА", extra={"body": callback.from_user.id})
                 await asyncio.sleep(1)
 
     if not profile or "error" in profile:
@@ -64,12 +65,8 @@ async def get_profile(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.clear()
     await state.update_data(profile_role=profile.get("role", "volunteer"))
-    template_name = (
-        "profile_organization.jinja2"
-        if profile.get("role") == "organizer"
-        else "profile.jinja2"
-    )
-    await callback.message.answer(render(template_name, user=profile), reply_markup=keyboard)
+    await callback.message.answer(render("profile.jinja2", user=profile), reply_markup=keyboard)
+    logger.info("ОТПРАВИЛИ ПРОФИЛЬ ВОЛОНТЕРА", extra={"body": callback.from_user.id})
     await callback.answer()
 
 
@@ -78,6 +75,7 @@ async def profile_back(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     role = data.get("profile_role", "volunteer")
     await state.clear()
+    logger.info("ОТПРАВИЛИ НАЗАД В МЕНЮ")
     await callback.message.answer("Меню бота:", reply_markup=build_menu_by_role(role))
     await callback.answer()
 
@@ -88,5 +86,6 @@ async def back_to_profile(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     role = data.get("profile_role", "volunteer")
     await state.clear()
+    logger.info("ОТПРАВИЛИ НАЗАД В ПРОФИЛЬ")
     await get_profile(callback, state)
     await callback.answer()

@@ -11,32 +11,30 @@ from config.settings import settings
 from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
-from src.models.models import Event, Organization, Participation, User, VolunteerStats
+from src.models.models import Event, Organization, User
 
 
-async def delete_profile(body: Dict[str, Any]) -> None:
+async def delete_organization(body: Dict[str, Any]) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
     user_id = int(body.get("id"))
     response_body: Dict[str, Any]
 
     try:
         async with async_session() as db:
-            result = await db.execute(select(User).where(User.telegram_id == user_id))
-            user = result.scalar_one_or_none()
-
-            if not user:
-                response_body = {"error": "user_not_found"}
+            user_result = await db.execute(select(User).where(User.telegram_id == user_id))
+            user = user_result.scalar_one_or_none()
+            if not user or user.role != "organizer":
+                response_body = {"error": "organization_not_found"}
             else:
-                await db.execute(delete(Participation).where(Participation.user_id == user.id))
-                await db.execute(delete(VolunteerStats).where(VolunteerStats.user_id == user.id))
                 await db.execute(delete(Event).where(Event.created_by == user.id))
                 await db.execute(delete(Organization).where(Organization.created_by == user.id))
-                await db.delete(user)
+                user.role = "volunteer"
+                user.profile_filled = False
                 await db.commit()
                 response_body = {"status": "deleted"}
-                logger.info("ПРОФИЛЬ ВОЛОНТЕРА УДАЛЕН", extra={"body": body.get("id")})
+                logger.info("ПРОФИЛЬ ОРГАНИЗАЦИИ УДАЛЕН", extra={"body": body.get("id")})
     except SQLAlchemyError:
-        logger.exception("ОШИБКА УДАЛЕНИЯ ПРОФИЛЯ")
+        logger.exception("ОШИБКА УДАЛЕНИЯ ПРОФИЛЯ ОРГАНИЗАЦИИ")
         response_body = {"error": "db_error"}
 
     async with rabbit.channel_pool.acquire() as channel:
@@ -47,4 +45,4 @@ async def delete_profile(body: Dict[str, Any]) -> None:
             aio_pika.Message(msgpack.packb(response_body)),
             routing_key=settings.USER_QUEUE.format(user_id=user_id),
         )
-        logger.info("ОТПРАВИЛИ ОТВЕТ НА УДАЛЕНИЕ ПРОФИЛЯ ВОЛОНТЕРА", extra={"body": body.get("id")})
+        logger.info("ОТПРАВИЛИ ОТВЕТ НА УДАЛЕНИЕ ПРОФИЛЯ ОРГАНИЗАЦИИ", extra={"body": body.get("id")})

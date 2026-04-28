@@ -11,7 +11,7 @@ from config.settings import settings
 from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
-from src.models.models import Organization, User
+from src.models.models import User
 
 
 async def update_profile(body: Dict[str, Any]) -> None:
@@ -28,30 +28,18 @@ async def update_profile(body: Dict[str, Any]) -> None:
             if not user:
                 response_body = {"error": "user_not_found"}
             else:
-                if field in {"name", "city", "gender"}:
+                if field in {"name", "city", "gender", "phone"}:
                     setattr(user, field, value)
                 elif field == "age":
                     user.age = int(value)
-                elif field in {
-                    "representative_name",
-                    "representative_phone",
-                    "website",
-                    "description",
-                }:
-                    org_result = await db.execute(
-                        select(Organization).where(Organization.created_by == user.id)
-                    )
-                    organization = org_result.scalar_one_or_none()
-                    if not organization:
-                        response_body = {"error": "organization_not_found"}
-                    else:
-                        setattr(organization, field, value)
                 else:
                     response_body = {"error": "invalid_field"}
 
                 if response_body is None:
                     await db.commit()
                     response_body = {"status": "updated"}
+                logger.info("ОБНОВЛЕНИЕ ПРОФИЛЯ ВОЛОНТЕРА В БД", extra={"body": body.get("id")})
+
     except (SQLAlchemyError, ValueError, TypeError):
         logger.exception("ОШИБКА ОБНОВЛЕНИЯ ПРОФИЛЯ")
         response_body = {"error": "db_error"}
@@ -64,3 +52,4 @@ async def update_profile(body: Dict[str, Any]) -> None:
             aio_pika.Message(msgpack.packb(response_body)),
             routing_key=settings.USER_QUEUE.format(user_id=user_id),
         )
+        logger.info("ОТПРАВИЛИ ОТВЕТ НА ОБНОВЛЕНИЕ ПРОФИЛЯ ВОЛОНТЕРА", extra={"body": body.get("id")})

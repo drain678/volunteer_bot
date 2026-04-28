@@ -24,12 +24,9 @@ async def request_to_consumer(payload: dict) -> dict | None:
         )
         await queue.bind(exchange, "user_messages")
         await user_queue.bind(exchange, settings.USER_QUEUE.format(user_id=user_id))
+        await exchange.publish(aio_pika.Message(msgpack.packb(payload)), "user_messages")
+        logger.info("ОТПРАВИЛИ ЗАПРОС НА УДАЛЕНИЕ ПРОФИЛЯ ОРГАНИЗАЦИИ В БД", extra={"body": user_id})
 
-        await exchange.publish(
-            aio_pika.Message(msgpack.packb(payload)),
-            "user_messages",
-        )
-        logger.info("ОТПРАВИЛИ ЗАПРОС НА УДАЛЕНИЕ ПРОФИЛЯ ВОЛОНТЕРА В БД", extra={"body": user_id})
         for _ in range(10):
             try:
                 res = await user_queue.get()
@@ -40,36 +37,38 @@ async def request_to_consumer(payload: dict) -> dict | None:
     return None
 
 
-@router.callback_query(lambda c: c.data == "delete_profile")
-async def ask_delete_profile(callback: CallbackQuery) -> None:
+@router.callback_query(lambda c: c.data == "delete_organization")
+async def ask_delete_organization(callback: CallbackQuery) -> None:
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Да, удалить", callback_data="delete_profile_yes"),
-                InlineKeyboardButton(text="Нет", callback_data="delete_profile_no"),
+                InlineKeyboardButton(text="Да, удалить", callback_data="delete_organization_yes"),
+                InlineKeyboardButton(text="Нет", callback_data="delete_organization_no"),
             ]
         ]
     )
-    await callback.message.answer("Ты точно хочешь удалить свой профиль?", reply_markup=keyboard)
+    await callback.message.answer(
+        "Ты точно хочешь удалить профиль организации?", reply_markup=keyboard
+    )
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "delete_profile_no")
-async def cancel_delete_profile(callback: CallbackQuery) -> None:
+@router.callback_query(lambda c: c.data == "delete_organization_no")
+async def cancel_delete_organization(callback: CallbackQuery) -> None:
     await callback.message.answer("Удаление отменено.")
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "delete_profile_yes")
-async def confirm_delete_profile(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(lambda c: c.data == "delete_organization_yes")
+async def confirm_delete_organization(callback: CallbackQuery, state: FSMContext) -> None:
     result = await request_to_consumer(
-        {"id": callback.from_user.id, "action": "delete_profile"}
+        {"id": callback.from_user.id, "action": "delete_organization"}
     )
     if not result or "error" in result:
-        await callback.message.answer("Не удалось удалить профиль. Попробуй позже.")
+        await callback.message.answer("Не удалось удалить профиль организации. Попробуй позже.")
         await callback.answer()
         return
 
     await state.clear()
-    await callback.message.answer("Профиль удален.")
+    await callback.message.answer("Профиль организации удален.")
     await callback.answer()
