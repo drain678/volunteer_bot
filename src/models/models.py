@@ -15,6 +15,7 @@ class User(Base):
 
     name: Mapped[str] = mapped_column(nullable=True)
     age: Mapped[int] = mapped_column(nullable=False)
+    gender: Mapped[str] = mapped_column(nullable=True)
     city: Mapped[str] = mapped_column(nullable=True)
 
     profile_filled: Mapped[bool] = mapped_column(default=False)
@@ -32,6 +33,7 @@ class User(Base):
             "id": str(self.id),
             "name": self.name,
             "age": str(self.age),
+            "gender": self.gender,
             "city": self.city,
             "profile_filled": self.profile_filled,
             "role": self.role,
@@ -46,8 +48,13 @@ class Organization(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str]
     description: Mapped[str]
+    representative_name: Mapped[str] = mapped_column(nullable=True)
+    representative_phone: Mapped[str] = mapped_column(nullable=True)
+    website: Mapped[str] = mapped_column(nullable=True)
 
-    created_by: Mapped[int] = mapped_column(ForeignKey("public.users.id"))
+    created_by: Mapped[int] = mapped_column(
+        ForeignKey("public.users.id", ondelete="CASCADE")
+    )
 
     events = relationship("Event", back_populates="organization")
 
@@ -76,15 +83,15 @@ class Event(Base):
     duration_hours: Mapped[float]
 
     organization_id: Mapped[int] = mapped_column(
-        ForeignKey("public.organizations.id")
+        ForeignKey("public.organizations.id", ondelete="CASCADE")
     )
 
     category_id: Mapped[int] = mapped_column(
-        ForeignKey("public.categories.id")
+        ForeignKey("public.categories.id", ondelete="CASCADE")
     )
 
     created_by: Mapped[int] = mapped_column(
-        ForeignKey("public.users.id")
+        ForeignKey("public.users.id", ondelete="CASCADE")
     )
 
     organization = relationship("Organization", back_populates="events")

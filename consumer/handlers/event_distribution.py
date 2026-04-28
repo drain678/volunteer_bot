@@ -1,22 +1,26 @@
 from typing import Any, Dict
 
 # from consumer.handlers.change_form import change_form
-from consumer.handlers.create_form import create_form
-# from consumer.handlers.delete_profile import delete_profile
-# from consumer.handlers.find_candidates import find_candidates
-# from consumer.handlers.get_likes import process_check_likes
+from consumer.handlers.create_profile import create_profile
+from consumer.handlers.create_organization_profile import create_organization_profile
+from consumer.handlers.delete_profile import delete_profile
 # from consumer.handlers.get_popular_users import get_top_popular_users
 from consumer.handlers.get_profile import get_profile
-# from consumer.handlers.like_user import process_like_user
-# from consumer.handlers.watch_matches import get_my_matches
+from consumer.handlers.update_profile import update_profile
 
 
 async def handle_event_distribution(body: Dict[str, Any]) -> None:
     match body["action"]:
         case "make_form":
-            await create_form(body)
+            await create_profile(body)
+        case "make_organization_form":
+            await create_organization_profile(body)
         case "get_profile":
             await get_profile(body)
+        case "delete_profile":
+            await delete_profile(body)
+        case "update_profile":
+            await update_profile(body)
         # case "find_pair":
         #     await find_candidates(body)
         # case "like_user":

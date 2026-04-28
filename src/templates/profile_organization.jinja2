@@ -1,0 +1,11 @@
+<b>Профиль организатора</b>
+
+🏢 Организация: {{ user.organization_name }}
+📝 Описание: {{ user.description }}
+{% if user.website %}
+🌐 <a href="{{ user.website }}"><u>Сайт организации</u></a>
+{% else %}
+🌐 Сайт организации: не указан
+{% endif %}
+👤 Представитель: {{ user.representative_name }}
+📞 Телефон: {{ user.representative_phone }}

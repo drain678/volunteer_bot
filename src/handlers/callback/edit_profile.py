@@ -1,0 +1,188 @@
+import asyncio
+
+import aio_pika
+import msgpack
+from aio_pika import ExchangeType
+from aio_pika.exceptions import QueueEmpty
+from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, Message
+
+from config.settings import settings
+from src.handlers.callback.get_profile import get_profile as show_profile
+from src.handlers.callback.router import router
+from src.handlers.state.create_organization_profile import OrganizationProfileState
+from src.handlers.state.create_profile import VolunteerProfileState
+from src.handlers.state.edit_profile import EditProfileState
+from src.storage.rabbit import channel_pool
+
+
+def edit_fields_keyboard(role: str) -> InlineKeyboardMarkup:
+    if role == "organizer":
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    text="Имя представителя",
+                    callback_data="edit_field_representative_name",
+                ),
+                InlineKeyboardButton(
+                    text="Телефон",
+                    callback_data="edit_field_representative_phone",
+                ),
+            ],
+            [
+                InlineKeyboardButton(text="Сайт", callback_data="edit_field_website"),
+                InlineKeyboardButton(text="Описание", callback_data="edit_field_description"),
+            ],
+        ]
+    else:
+        buttons = [
+            [
+                InlineKeyboardButton(text="Имя", callback_data="edit_field_name"),
+                InlineKeyboardButton(text="Возраст", callback_data="edit_field_age"),
+            ],
+            [
+                InlineKeyboardButton(text="Город", callback_data="edit_field_city"),
+            ],
+        ]
+
+    buttons.append(
+        [InlineKeyboardButton(text="Создать профиль заново", callback_data="recreate_profile")]
+    )
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="back_to_profile")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def edit_more_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да", callback_data="edit_more_yes"),
+                InlineKeyboardButton(text="Нет", callback_data="edit_more_no"),
+            ]
+        ]
+    )
+
+
+async def request_to_consumer(payload: dict) -> dict | None:
+    user_id = payload["id"]
+    async with channel_pool.acquire() as channel:
+        exchange = await channel.declare_exchange(
+            "user_form", ExchangeType.TOPIC, durable=True
+        )
+        queue = await channel.declare_queue("user_messages", durable=True)
+        user_queue = await channel.declare_queue(
+            settings.USER_QUEUE.format(user_id=user_id), durable=True
+        )
+        await queue.bind(exchange, "user_messages")
+        await user_queue.bind(exchange, settings.USER_QUEUE.format(user_id=user_id))
+
+        await exchange.publish(
+            aio_pika.Message(msgpack.packb(payload)),
+            "user_messages",
+        )
+
+        for _ in range(10):
+            try:
+                res = await user_queue.get()
+                await res.ack()
+                return msgpack.unpackb(res.body)
+            except QueueEmpty:
+                await asyncio.sleep(1)
+    return None
+
+
+@router.callback_query(lambda c: c.data == "edit_profile")
+async def start_edit_profile(callback: CallbackQuery, state: FSMContext) -> None:
+    profile = await request_to_consumer({"id": callback.from_user.id, "action": "get_profile"})
+    if not profile or "error" in profile:
+        await callback.answer("Профиль не найден", show_alert=True)
+        return
+
+    role = profile.get("role", "volunteer")
+    await state.update_data(profile_role=role)
+    await callback.message.answer(
+        "Что вы хотите изменить?",
+        reply_markup=edit_fields_keyboard(role),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "recreate_profile")
+async def recreate_profile(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    role = data.get("profile_role", "volunteer")
+    await state.clear()
+    if role == "organizer":
+        await state.set_state(OrganizationProfileState.representative_name)
+        await callback.message.answer("Имя представителя организации?")
+    else:
+        await state.set_state(VolunteerProfileState.name)
+        await callback.message.answer("Как тебя зовут?")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("edit_field_"))
+async def choose_edit_field(callback: CallbackQuery, state: FSMContext) -> None:
+    field = callback.data.replace("edit_field_", "", 1)
+    prompts = {
+        "name": "Введи новое имя:",
+        "age": "Введи новый возраст:",
+        "city": "Введи новый город:",
+        "representative_name": "Введи новое имя представителя:",
+        "representative_phone": "Введи новый телефон представителя:",
+        "website": "Введи новый сайт организации:",
+        "description": "Введи новое описание организации:",
+    }
+    await state.set_state(EditProfileState.waiting_new_value)
+    await state.update_data(edit_field=field)
+    await callback.message.answer(prompts.get(field, "Введи новое значение:"))
+    await callback.answer()
+
+
+@router.message(EditProfileState.waiting_new_value)
+async def update_profile_value(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    field = data.get("edit_field")
+    role = data.get("profile_role", "volunteer")
+    value = (message.text or "").strip()
+    if not field or not value:
+        await message.answer("Введите корректное значение.")
+        return
+
+    if field == "age" and not value.isdigit():
+        await message.answer("Возраст должен быть числом.")
+        return
+
+    result = await request_to_consumer(
+        {
+            "id": message.from_user.id,
+            "action": "update_profile",
+            "field": field,
+            "value": value,
+        }
+    )
+    if not result or "error" in result:
+        await message.answer("Не удалось обновить профиль. Попробуй позже.")
+        return
+
+    await state.clear()
+    await message.answer("Хочешь изменить что-то еще?", reply_markup=edit_more_keyboard())
+    await state.update_data(profile_role=role)
+
+
+@router.callback_query(lambda c: c.data == "edit_more_yes")
+async def edit_more_yes(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    role = data.get("profile_role", "volunteer")
+    await callback.message.answer(
+        "Что вы хотите изменить?",
+        reply_markup=edit_fields_keyboard(role),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "edit_more_no")
+async def edit_more_no(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.message.answer("Профиль обновлен!")
+    await show_profile(callback, state)
