@@ -1,0 +1,9 @@
+<b>{{ user.organization_name }}</b>
+📝 {{ user.description }}
+{%- if user.website %}
+🌐 <a href="{{ user.website }}"><u>Сайт организации</u></a>
+{%- else %}
+🌐 Сайт организации не указан
+{%- endif %}
+Контакты:
+📞 {{ user.representative_phone }}, {{ user.representative_name }}

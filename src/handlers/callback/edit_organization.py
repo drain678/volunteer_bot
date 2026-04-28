@@ -1,11 +1,12 @@
 import asyncio
 import re
-
+import logging
 import aio_pika
 import msgpack
 from aio_pika import ExchangeType
 from aio_pika.exceptions import QueueEmpty
 from aiogram.fsm.context import FSMContext
+from consumer.logger import LOGGING_CONFIG, logger
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.settings import settings
@@ -47,6 +48,7 @@ def edit_org_more_keyboard() -> InlineKeyboardMarkup:
 
 async def request_to_consumer(payload: dict) -> dict | None:
     user_id = payload["id"]
+    logging.config.dictConfig(LOGGING_CONFIG)
     async with channel_pool.acquire() as channel:
         exchange = await channel.declare_exchange(
             "user_form", ExchangeType.TOPIC, durable=True
