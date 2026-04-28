@@ -3,6 +3,7 @@ from typing import Any, Dict
 # from consumer.handlers.change_form import change_form
 from consumer.handlers.create_profile import create_profile
 from consumer.handlers.create_organization_profile import create_organization_profile
+from consumer.handlers.create_event import create_event
 from consumer.handlers.delete_profile import delete_profile
 from consumer.handlers.delete_organization import delete_organization
 # from consumer.handlers.get_popular_users import get_top_popular_users
@@ -19,6 +20,8 @@ async def handle_event_distribution(body: Dict[str, Any]) -> None:
             await create_profile(body)
         case "make_organization_form":
             await create_organization_profile(body)
+        case "create_event":
+            await create_event(body)
         case "get_profile":
             await get_profile(body)
         case "get_organization":

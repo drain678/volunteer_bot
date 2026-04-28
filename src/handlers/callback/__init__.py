@@ -1,4 +1,5 @@
 from . import (
+    create_event,
     create_organization,
     create_profile,
     delete_profile,

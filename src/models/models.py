@@ -77,9 +77,9 @@ class Event(Base):
 
     title: Mapped[str]
     description: Mapped[str]
+    min_age: Mapped[int]
 
     city: Mapped[str]
-    location: Mapped[str]
 
     start_time: Mapped[datetime]
     duration_hours: Mapped[float]
