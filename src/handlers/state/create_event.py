@@ -9,3 +9,4 @@ class CreateEventState(StatesGroup):
     start_time = State()
     duration_hours = State()
     category = State()
+    direction_more = State()

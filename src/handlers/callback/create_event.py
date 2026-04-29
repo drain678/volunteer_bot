@@ -31,6 +31,18 @@ FILTER_DIRECTIONS = [
     "Образование",
 ]
 
+
+def _direction_more_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да", callback_data="event_direction_more_yes"),
+                InlineKeyboardButton(text="Нет", callback_data="event_direction_more_no"),
+            ]
+        ]
+    )
+
+
 def _directions_keyboard(directions: list[str], page: int) -> InlineKeyboardMarkup:
     page_size = 4
     pages = max(1, (len(directions) + page_size - 1) // page_size)
@@ -179,7 +191,7 @@ async def event_duration(message: Message, state: FSMContext) -> None:
         return
     await state.update_data(duration_hours=duration_hours)
     await state.set_state(CreateEventState.category)
-    await state.update_data(event_directions=FILTER_DIRECTIONS)
+    await state.update_data(event_directions=FILTER_DIRECTIONS, selected_directions=[])
     await message.answer(
         "Выберите направление:",
         reply_markup=_directions_keyboard(FILTER_DIRECTIONS, page=0),
@@ -221,6 +233,43 @@ async def event_direction_pick(callback: CallbackQuery, state: FSMContext) -> No
         await callback.answer("Некорректное направление", show_alert=True)
         return
 
+    selected_directions = list(event_data.get("selected_directions", []))
+    if direction not in selected_directions:
+        selected_directions.append(direction)
+    await state.update_data(selected_directions=selected_directions)
+    await state.set_state(CreateEventState.direction_more)
+    await callback.message.answer(
+        "Хотите еще выбрать направление?",
+        reply_markup=_direction_more_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(
+    StateFilter(CreateEventState.direction_more),
+    lambda c: c.data == "event_direction_more_yes",
+)
+async def event_direction_more_yes(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(CreateEventState.category)
+    await callback.message.answer(
+        "Выберите направление:",
+        reply_markup=_directions_keyboard(FILTER_DIRECTIONS, page=0),
+    )
+    await callback.answer()
+
+
+@router.callback_query(
+    StateFilter(CreateEventState.direction_more),
+    lambda c: c.data == "event_direction_more_no",
+)
+async def event_direction_more_no(callback: CallbackQuery, state: FSMContext) -> None:
+    event_data = await state.get_data()
+    selected_directions = list(event_data.get("selected_directions", []))
+    if not selected_directions:
+        await callback.answer("Нужно выбрать хотя бы одно направление", show_alert=True)
+        return
+    direction_value = ", ".join(selected_directions)
+
     create_response = await _request_to_consumer(
         callback.from_user.id,
         "create_event",
@@ -231,7 +280,7 @@ async def event_direction_pick(callback: CallbackQuery, state: FSMContext) -> No
             "city": event_data.get("city"),
             "start_time": event_data.get("start_time"),
             "duration_hours": event_data.get("duration_hours"),
-            "direction": direction,
+            "direction": direction_value,
         },
     )
     if not create_response or "error" in create_response:

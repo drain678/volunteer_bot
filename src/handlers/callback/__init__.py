@@ -6,6 +6,7 @@ from . import (
     delete_organization,
     edit_organization,
     edit_profile,
+    get_events,
     get_organization,
     get_my_events,
     get_organizations,
