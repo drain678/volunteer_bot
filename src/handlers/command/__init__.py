@@ -1,1 +1,1 @@
-from . import menu, start
+from . import menu, start, test_role

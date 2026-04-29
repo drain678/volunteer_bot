@@ -137,7 +137,7 @@ async def volunteer_gender(callback: CallbackQuery, state: FSMContext) -> None:
                 result = msgpack.unpackb(res.body)
 
                 if "error" in result:
-                    await callback.message.answer("Не удалось создать профиль да")
+                    await callback.message.answer("Не удалось создать профиль")
                     await callback.answer()
                     return
 
@@ -153,5 +153,5 @@ async def volunteer_gender(callback: CallbackQuery, state: FSMContext) -> None:
                 logger.info("ОТВЕТ ОТ БД НЕ ПОЛУЧЕН, ОЧЕРЕДЬ ПУСТА", extra={"body": callback.from_user.id})
                 await asyncio.sleep(1)
 
-    await callback.message.answer("Не удалось создать профиль пон ")
+    await callback.message.answer("Не удалось создать профиль")
     await callback.answer()

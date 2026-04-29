@@ -12,7 +12,7 @@ from src.templates.env import render
 
 @router.message(Command("start"))
 async def start(message: Message, state: FSMContext) -> None:
-    await state.clear()
+    await state.set_state(None)
 
     async with async_session() as db:
         result = await db.execute(
