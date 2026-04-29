@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import aio_pika
 import msgpack
@@ -6,15 +7,19 @@ import logging.config
 import re
 from aio_pika import ExchangeType
 from aio_pika.exceptions import QueueEmpty
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from consumer.logger import LOGGING_CONFIG, logger
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy import select
 
 from config.settings import settings
 from src.handlers.callback.router import router
 from src.handlers.command.menu import build_menu_by_role
 from src.handlers.state.create_organization_profile import OrganizationProfileState
+from src.models.models import User
+from src.storage.db import async_session
 from src.storage.rabbit import channel_pool
 from src.templates.env import render
 
@@ -43,6 +48,8 @@ FILTER_TYPES = [
     "ССУЗ",
     "Школа",
 ]
+
+PENDING_ORGANIZATION_REQUESTS: dict[str, dict] = {}
 
 
 def _direction_keyboard(page: int) -> InlineKeyboardMarkup:
@@ -119,6 +126,57 @@ def _direction_more_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def _moderation_keyboard(request_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Принять заявку", callback_data=f"org_req_approve_{request_id}"
+                ),
+                InlineKeyboardButton(
+                    text="Отклонить заявку", callback_data=f"org_req_reject_{request_id}"
+                ),
+            ]
+        ]
+    )
+
+
+async def _is_admin(telegram_id: int) -> bool:
+    async with async_session() as db:
+        result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalar_one_or_none()
+        return bool(user and user.role == "admin")
+
+
+async def _request_create_organization(profile_payload: dict) -> dict | None:
+    applicant_id = int(profile_payload["id"])
+    async with channel_pool.acquire() as channel:
+        exchange = await channel.declare_exchange(
+            "user_form", ExchangeType.TOPIC, durable=True
+        )
+        queue = await channel.declare_queue("user_messages", durable=True)
+        user_queue = await channel.declare_queue(
+            settings.USER_QUEUE.format(user_id=applicant_id), durable=True
+        )
+        await queue.bind(exchange, "user_messages")
+        await user_queue.bind(
+            exchange, settings.USER_QUEUE.format(user_id=applicant_id)
+        )
+
+        await exchange.publish(
+            aio_pika.Message(msgpack.packb(profile_payload)),
+            routing_key="user_messages",
+        )
+        for _ in range(10):
+            try:
+                res = await user_queue.get(timeout=3)
+                await res.ack()
+                return msgpack.unpackb(res.body)
+            except QueueEmpty:
+                await asyncio.sleep(1)
+    return None
 
 
 @router.callback_query(lambda c: c.data in {"role_organizer"})
@@ -313,51 +371,104 @@ async def organization_type_pick(callback: CallbackQuery, state: FSMContext) -> 
         "type_organization": profile_data.get("type_organization"),
     }
 
-    async with channel_pool.acquire() as channel:
-        exchange = await channel.declare_exchange(
-            "user_form", ExchangeType.TOPIC, durable=True
+    request_id = f"{callback.from_user.id}_{int(time.time())}"
+    PENDING_ORGANIZATION_REQUESTS[request_id] = body
+    try:
+        await callback.bot.send_message(
+            callback.from_user.id, "Новая заявка на профиль организатора"
         )
-        queue = await channel.declare_queue("user_messages", durable=True)
-        user_queue = await channel.declare_queue(
-            settings.USER_QUEUE.format(user_id=callback.from_user.id), durable=True
+        await callback.bot.send_message(
+            callback.from_user.id,
+            render("profile_organization.jinja2", user=body),
+            reply_markup=_moderation_keyboard(request_id),
         )
-        await queue.bind(exchange, "user_messages")
-        await user_queue.bind(
-            exchange, settings.USER_QUEUE.format(user_id=callback.from_user.id)
-        )
+    except TelegramBadRequest:
+        pass
 
-        await exchange.publish(
-            aio_pika.Message(msgpack.packb(body)),
-            routing_key="user_messages",
-        )
-        logger.info(
-            "ОТПРАВИЛИ ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ ОРГАНИЗАЦИИ В БД",
-            extra={"body": callback.from_user.id},
-        )
-
-        for _ in range(10):
-            try:
-                res = await user_queue.get(timeout=3)
-                await res.ack()
-                result = msgpack.unpackb(res.body)
-                if "error" in result:
-                    await callback.message.answer("Не удалось создать профиль. Попробуй позже.")
-                    return
-
-                await callback.message.answer("Профиль успешно создан!")
-                await callback.message.answer(render("profile_organization.jinja2", user=result))
-                await callback.message.answer(
-                    "Меню бота:", reply_markup=build_menu_by_role("organizer")
-                )
-                await state.clear()
-                await callback.answer()
-                return
-            except QueueEmpty:
-                logger.info(
-                    "ОТВЕТ ОТ БД НЕ ПОЛУЧЕН, ОЧЕРЕДЬ ПУСТА",
-                    extra={"body": callback.from_user.id},
-                )
-                await asyncio.sleep(1)
-
-    await callback.message.answer("Не удалось создать профиль. Попробуй позже.")
+    await callback.message.answer(
+        "Заявка отправлена администратору на проверку. Ожидайте решение."
+    )
+    await state.clear()
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("org_req_approve_"))
+async def approve_org_request(callback: CallbackQuery) -> None:
+    if not await _is_admin(callback.from_user.id):
+        await callback.answer("Только администратор может подтверждать заявку", show_alert=True)
+        return
+    request_id = callback.data.removeprefix("org_req_approve_")
+    payload = PENDING_ORGANIZATION_REQUESTS.get(request_id)
+    if not payload:
+        await callback.answer("Заявка не найдена или уже обработана", show_alert=True)
+        return
+
+    result = await _request_create_organization(payload)
+    if not result or "error" in result:
+        await callback.answer("Не удалось создать профиль организатора", show_alert=True)
+        return
+
+    PENDING_ORGANIZATION_REQUESTS.pop(request_id, None)
+    applicant_id = payload.get("id")
+    try:
+        await callback.bot.send_message(
+            applicant_id, "Ваша заявка одобрена. Профиль организатора создан."
+        )
+        await callback.bot.send_message(
+            applicant_id, render("profile_organization.jinja2", user=result)
+        )
+        await callback.bot.send_message(
+            applicant_id, "Меню бота:", reply_markup=build_menu_by_role("organizer")
+        )
+    except TelegramBadRequest:
+        pass
+
+    await callback.answer("Заявка подтверждена", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("org_req_reject_"))
+async def reject_org_request_start(callback: CallbackQuery, state: FSMContext) -> None:
+    if not await _is_admin(callback.from_user.id):
+        await callback.answer("Только администратор может отклонять заявку", show_alert=True)
+        return
+    request_id = callback.data.removeprefix("org_req_reject_")
+    if request_id not in PENDING_ORGANIZATION_REQUESTS:
+        await callback.answer("Заявка не найдена или уже обработана", show_alert=True)
+        return
+    await state.set_state(OrganizationProfileState.moderation_reject_reason)
+    await state.update_data(reject_org_request_id=request_id)
+    await callback.message.answer("Напишите причину отклонения:")
+    await callback.answer()
+
+
+@router.message(OrganizationProfileState.moderation_reject_reason)
+async def reject_org_request_reason(message: Message, state: FSMContext) -> None:
+    if not await _is_admin(message.from_user.id):
+        await message.answer("Только администратор может отклонять заявку.")
+        await state.clear()
+        return
+
+    reason = (message.text or "").strip()
+    if not reason:
+        await message.answer("Причина не должна быть пустой.")
+        return
+
+    data = await state.get_data()
+    request_id = data.get("reject_org_request_id")
+    payload = PENDING_ORGANIZATION_REQUESTS.pop(request_id, None)
+    if not payload:
+        await message.answer("Заявка не найдена или уже обработана.")
+        await state.clear()
+        return
+
+    applicant_id = payload.get("id")
+    try:
+        await message.bot.send_message(
+            applicant_id,
+            "Благодарим за проявленный интерес, но ваша заявка была отклонена по причине: "
+            f"{reason}",
+        )
+    except TelegramBadRequest:
+        pass
+    await message.answer("Заявка отклонена.")
+    await state.clear()

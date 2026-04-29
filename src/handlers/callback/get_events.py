@@ -394,4 +394,48 @@ async def participate_event(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("Не удалось записаться на мероприятие", show_alert=True)
         return
 
+    volunteer = response.get("volunteer") or {}
+    participation_id = response.get("participation_id")
+    organizer_tg = response.get("organizer_telegram_id")
+    event_title = response.get("event_title") or event.get("title")
+    if organizer_tg and participation_id:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Принять заявку",
+                        callback_data=f"participation_approve_{participation_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="Отклонить заявку",
+                        callback_data=f"participation_reject_{participation_id}",
+                    ),
+                ]
+            ]
+        )
+        try:
+            await callback.bot.send_message(organizer_tg, "У вас новая заявка на участие")
+            await callback.bot.send_message(
+                organizer_tg,
+                (
+                    "<b>Профиль</b>\n\n"
+                    f"👤 Имя: {volunteer.get('name')}\n"
+                    f"🎂 Возраст: {volunteer.get('age')}\n"
+                    f"📍 Город: {volunteer.get('city')}\n"
+                    f"📞 Телефон: {volunteer.get('phone')}\n"
+                    f"⚧ Пол: {'Ж' if volunteer.get('gender') == 'f' else 'М'}\n"
+                    f"🎯 Мероприятие: {event_title}"
+                ),
+                reply_markup=keyboard,
+            )
+            await callback.answer("Заявка на участие отправлена", show_alert=True)
+            return
+        except TelegramBadRequest:
+            await callback.answer(
+                "Заявка создана, но организатору не удалось отправить сообщение. "
+                "Пусть организатор напишет боту /start.",
+                show_alert=True,
+            )
+            return
+
     await callback.answer("Заявка на участие отправлена", show_alert=True)

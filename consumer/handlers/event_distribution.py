@@ -14,6 +14,7 @@ from consumer.handlers.get_events import get_events
 from consumer.handlers.get_my_events import get_my_events
 from consumer.handlers.get_event_participants import get_event_participants
 from consumer.handlers.participate_event import participate_event
+from consumer.handlers.review_participation import review_participation
 from consumer.handlers.update_profile import update_profile
 from consumer.handlers.update_organization import update_organization
 
@@ -40,6 +41,8 @@ async def handle_event_distribution(body: Dict[str, Any]) -> None:
             await get_event_participants(body)
         case "participate_event":
             await participate_event(body)
+        case "review_participation":
+            await review_participation(body)
         case "delete_profile":
             await delete_profile(body)
         case "update_profile":

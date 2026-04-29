@@ -31,7 +31,10 @@ async def get_event_participants(body: Dict[str, Any]) -> None:
                 participants_result = await db.execute(
                     select(User.name, User.phone, Participation.status)
                     .join(Participation, Participation.user_id == User.id)
-                    .where(Participation.event_id == event.id)
+                    .where(
+                        Participation.event_id == event.id,
+                        Participation.status == "approved",
+                    )
                     .order_by(Participation.id)
                 )
                 participants_rows = participants_result.all()

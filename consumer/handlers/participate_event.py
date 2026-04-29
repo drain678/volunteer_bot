@@ -46,8 +46,25 @@ async def participate_event(body: Dict[str, Any]) -> None:
                     else:
                         participation = Participation(user_id=user.id, event_id=event.id)
                         db.add(participation)
+                        await db.flush()
                         await db.commit()
-                        response_body = {"ok": True}
+                        organizer_result = await db.execute(
+                            select(User).where(User.id == event.created_by)
+                        )
+                        organizer = organizer_result.scalar_one_or_none()
+                        response_body = {
+                            "ok": True,
+                            "participation_id": participation.id,
+                            "event_title": event.title,
+                            "organizer_telegram_id": organizer.telegram_id if organizer else None,
+                            "volunteer": {
+                                "name": user.name,
+                                "age": user.age,
+                                "city": user.city,
+                                "phone": user.phone,
+                                "gender": user.gender,
+                            },
+                        }
     except (SQLAlchemyError, ValueError, TypeError):
         logger.exception("ОШИБКА ЗАПИСИ НА МЕРОПРИЯТИЕ")
         response_body = {"error": "participation_failed"}
@@ -58,3 +75,4 @@ async def participate_event(body: Dict[str, Any]) -> None:
             aio_pika.Message(msgpack.packb(response_body)),
             routing_key=settings.USER_QUEUE.format(user_id=user_id),
         )
+        logger.info("ОТПРАВИЛИ ОТВЕТ НА ЗАПИСЬ НА МЕРОПРИЯТИЕ", extra={"body": user_id})

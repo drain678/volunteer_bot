@@ -11,3 +11,4 @@ class OrganizationProfileState(StatesGroup):
     direction_select = State()
     direction_more = State()
     type_select = State()
+    moderation_reject_reason = State()
