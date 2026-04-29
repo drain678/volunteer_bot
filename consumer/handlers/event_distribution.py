@@ -10,6 +10,8 @@ from consumer.handlers.delete_organization import delete_organization
 from consumer.handlers.get_profile import get_profile
 from consumer.handlers.get_organization import get_organization
 from consumer.handlers.get_organizations import get_organizations
+from consumer.handlers.get_my_events import get_my_events
+from consumer.handlers.get_event_participants import get_event_participants
 from consumer.handlers.update_profile import update_profile
 from consumer.handlers.update_organization import update_organization
 
@@ -28,6 +30,10 @@ async def handle_event_distribution(body: Dict[str, Any]) -> None:
             await get_organization(body)
         case "get_organizations":
             await get_organizations(body)
+        case "get_my_events":
+            await get_my_events(body)
+        case "get_event_participants":
+            await get_event_participants(body)
         case "delete_profile":
             await delete_profile(body)
         case "update_profile":

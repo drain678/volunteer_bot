@@ -7,6 +7,7 @@ from . import (
     edit_organization,
     edit_profile,
     get_organization,
+    get_my_events,
     get_organizations,
     get_profile,
 )
