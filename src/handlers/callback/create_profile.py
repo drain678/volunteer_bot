@@ -16,19 +16,7 @@ from src.handlers.callback.router import router
 from src.handlers.command.menu import build_menu_by_role
 from src.handlers.state.create_profile import VolunteerProfileState
 from src.storage.rabbit import channel_pool
-
-def _profile_text(profile: dict) -> str:
-    role_text = "волонтёр" if profile.get("role") == "volunteer" else "организатор"
-    gender_value = profile.get("gender")
-    gender_text = "ж" if gender_value == "f" else "м"
-    return (
-        "<b>Профиль</b>\n\n"
-        f"👤 Имя: {profile.get('name')}\n"
-        f"🎂 Возраст: {profile.get('age')}\n"
-        f"📍 Город: {profile.get('city')}\n"
-        f"📞 Телефон: {profile.get('phone')}\n"
-        f"⚧ Пол: {gender_text}\n"
-    )
+from src.templates.env import render
 
 
 @router.callback_query(lambda c: c.data in {"role_volunteer"})
@@ -154,7 +142,7 @@ async def volunteer_gender(callback: CallbackQuery, state: FSMContext) -> None:
                     return
 
                 await callback.message.answer("Профиль успешно создан!")
-                await callback.message.answer(_profile_text(result))
+                await callback.message.answer(render("profile.jinja2", user=result))
                 await callback.message.answer(
                     "Меню бота:", reply_markup=build_menu_by_role("volunteer")
                 )

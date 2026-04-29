@@ -50,6 +50,9 @@ class Organization(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str]
     description: Mapped[str]
+    direction: Mapped[str]
+    city: Mapped[str]
+    type_organization: Mapped[str]
     representative_name: Mapped[str] = mapped_column(nullable=True)
     representative_phone: Mapped[str] = mapped_column(nullable=True)
     website: Mapped[str] = mapped_column(nullable=True)
@@ -59,15 +62,6 @@ class Organization(Base):
     )
 
     events = relationship("Event", back_populates="organization")
-
-
-class Category(Base):
-    __tablename__ = "categories"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str]
-
-    events = relationship("Event", back_populates="category")
 
 
 class Event(Base):
@@ -80,6 +74,7 @@ class Event(Base):
     min_age: Mapped[int]
 
     city: Mapped[str]
+    direction: Mapped[str]
 
     start_time: Mapped[datetime]
     duration_hours: Mapped[float]
@@ -88,16 +83,11 @@ class Event(Base):
         ForeignKey("public.organizations.id", ondelete="CASCADE")
     )
 
-    category_id: Mapped[int] = mapped_column(
-        ForeignKey("public.categories.id", ondelete="CASCADE")
-    )
-
     created_by: Mapped[int] = mapped_column(
         ForeignKey("public.users.id", ondelete="CASCADE")
     )
 
     organization = relationship("Organization", back_populates="events")
-    category = relationship("Category", back_populates="events")
     participations = relationship("Participation", back_populates="event")
 
 

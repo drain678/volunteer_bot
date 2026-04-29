@@ -25,6 +25,9 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
     representative_phone = (body.get("representative_phone") or "").strip()
     website = (body.get("website") or "").strip()
     description = (body.get("description") or "").strip()
+    city = (body.get("city") or "").strip()
+    direction = (body.get("direction") or "").strip()
+    type_organization = (body.get("type_organization") or "").strip()
 
     is_phone_valid = bool(re.fullmatch(r"^\+?\d{11}$", representative_phone))
 
@@ -35,6 +38,9 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
             representative_phone,
             website,
             description,
+            city,
+            direction,
+            type_organization,
         ]
     ) or not is_phone_valid:
         response_body = {"error": "invalid_profile_data"}
@@ -70,6 +76,9 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
                     organization = Organization(
                         name=organization_name,
                         description=description,
+                        city=city,
+                        direction=direction,
+                        type_organization=type_organization,
                         representative_name=representative_name,
                         representative_phone=representative_phone,
                         website=website,
@@ -79,16 +88,25 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
                 else:
                     organization.name = organization_name
                     organization.description = description
+                    organization.city = city
+                    organization.direction = direction
+                    organization.type_organization = type_organization
                     organization.representative_name = representative_name
                     organization.representative_phone = representative_phone
                     organization.website = website
 
                 await db.commit()
-                logger.info("БД СДЕЛАЛО ПРОФИЛЬ ОРГАНИЗАЦИИ", extra={"body": get("id")})
+                logger.info(
+                    "БД СДЕЛАЛО ПРОФИЛЬ ОРГАНИЗАЦИИ",
+                    extra={"body": body.get("id")},
+                )
 
                 response_body = {
                     "role": user.role,
                     "organization_name": organization.name,
+                    "city": organization.city,
+                    "direction": organization.direction,
+                    "type_organization": organization.type_organization,
                     "representative_name": organization.representative_name,
                     "representative_phone": organization.representative_phone,
                     "website": organization.website,

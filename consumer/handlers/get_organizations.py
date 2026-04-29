@@ -4,7 +4,7 @@ from typing import Any, Dict
 import aio_pika
 import msgpack
 from aio_pika import ExchangeType
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from config.settings import settings
@@ -20,13 +20,33 @@ async def get_organizations(body: Dict[str, Any]) -> None:
     response_body: Dict[str, Any]
 
     try:
+        filters = body.get("filters") or {}
+        cities = [c for c in filters.get("cities", []) if c]
+        directions = [d for d in filters.get("directions", []) if d]
+        types = [t for t in filters.get("types", []) if t]
+
         async with async_session() as db:
-            result = await db.execute(select(Organization).order_by(Organization.id))
+            logger.info("ПОЛУЧЕН ЗАПРОС НА ПОЛУЧЕНИЕ СПИСКА ОРГАНИЗАЦИЙ В БД")
+            query = select(Organization)
+            if cities:
+                query = query.where(Organization.city.in_(cities))
+            if directions:
+                query = query.where(
+                    or_(*[Organization.direction.ilike(f"%{direction}%") for direction in directions])
+                )
+            if types:
+                query = query.where(Organization.type_organization.in_(types))
+            query = query.order_by(Organization.id)
+
+            result = await db.execute(query)
             organizations = result.scalars().all()
             response_body = {
                 "organizations": [
                     {
                         "organization_name": org.name,
+                        "city": org.city,
+                        "direction": org.direction,
+                        "type_organization": org.type_organization,
                         "representative_name": org.representative_name,
                         "representative_phone": org.representative_phone,
                         "website": org.website,

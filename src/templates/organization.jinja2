@@ -1,4 +1,7 @@
 <b>{{ user.organization_name }}</b>
+🏙 Город: {{ user.city }}
+🧭 Направление: {{ user.direction }}
+🏢 Тип организации: {{ user.type_organization }}
 📝 {{ user.description }}
 {%- if user.website %}
 🌐 <a href="{{ user.website }}"><u>Сайт организации</u></a>

@@ -12,7 +12,7 @@ from config.settings import settings
 from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
-from src.models.models import Category, Event, Organization, User
+from src.models.models import Event, Organization, User
 
 
 async def create_event(body: Dict[str, Any]) -> None:
@@ -24,12 +24,12 @@ async def create_event(body: Dict[str, Any]) -> None:
         title = (body.get("title") or "").strip()
         description = (body.get("description") or "").strip()
         city = (body.get("city") or "").strip()
-        category_name = (body.get("category") or "").strip()
+        direction = (body.get("direction") or "").strip()
         min_age = int(body.get("min_age"))
         duration_hours = float(body.get("duration_hours"))
         start_time = datetime.strptime(body.get("start_time"), "%d.%m.%Y %H:%M")
 
-        if not all([title, description, city, category_name]) or duration_hours <= 0:
+        if not all([title, description, city, direction]) or duration_hours <= 0:
             response_body = {"error": "invalid_event_data"}
         else:
             async with async_session() as db:
@@ -48,24 +48,15 @@ async def create_event(body: Dict[str, Any]) -> None:
                     if not organization:
                         response_body = {"error": "organization_not_found"}
                     else:
-                        cat_result = await db.execute(
-                            select(Category).where(Category.name == category_name)
-                        )
-                        category = cat_result.scalar_one_or_none()
-                        if not category:
-                            category = Category(name=category_name)
-                            db.add(category)
-                            await db.flush()
-
                         event = Event(
                             title=title,
                             description=description,
                             min_age=min_age,
                             city=city,
+                            direction=direction,
                             start_time=start_time,
                             duration_hours=duration_hours,
                             organization_id=organization.id,
-                            category_id=category.id,
                             created_by=user.id,
                         )
                         db.add(event)
@@ -77,9 +68,9 @@ async def create_event(body: Dict[str, Any]) -> None:
                             "description": event.description,
                             "min_age": event.min_age,
                             "city": event.city,
+                            "direction": event.direction,
                             "start_time": event.start_time.strftime("%d.%m.%Y %H:%M"),
                             "duration_hours": event.duration_hours,
-                            "category": category.name,
                         }
     except (SQLAlchemyError, ValueError, TypeError):
         logger.exception("ОШИБКА СОЗДАНИЯ МЕРОПРИЯТИЯ")

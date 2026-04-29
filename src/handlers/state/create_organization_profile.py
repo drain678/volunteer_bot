@@ -7,3 +7,7 @@ class OrganizationProfileState(StatesGroup):
     representative_phone = State()
     website = State()
     description = State()
+    city = State()
+    direction_select = State()
+    direction_more = State()
+    type_select = State()

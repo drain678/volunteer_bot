@@ -38,6 +38,9 @@ async def get_organization(body: Dict[str, Any]) -> None:
                 else:
                     response_body = {
                         "organization_name": organization.name,
+                        "city": organization.city,
+                        "direction": organization.direction,
+                        "type_organization": organization.type_organization,
                         "representative_name": organization.representative_name,
                         "representative_phone": organization.representative_phone,
                         "website": organization.website,

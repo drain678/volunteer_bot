@@ -4,6 +4,7 @@ import aio_pika
 import msgpack
 from aio_pika import ExchangeType
 from aio_pika.exceptions import QueueEmpty
+from aiogram.exceptions import TelegramBadRequest
 from consumer.logger import LOGGING_CONFIG, logger
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -44,6 +45,14 @@ async def _request_to_consumer(user_id: int, action: str, payload: dict | None =
     return None
 
 
+async def _safe_edit_text(callback: CallbackQuery, text: str, keyboard: InlineKeyboardMarkup) -> None:
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
+
+
 def _my_events_keyboard(index: int, total: int) -> InlineKeyboardMarkup:
     prev_index = (index - 1) % total
     next_index = (index + 1) % total
@@ -73,9 +82,10 @@ async def _show_my_event_by_index(callback: CallbackQuery, index: int) -> None:
     event = events[index]
     keyboard = _my_events_keyboard(index=index, total=len(events))
 
-    await callback.message.answer(
+    await _safe_edit_text(
+        callback,
         render("my_event.jinja2", event=event),
-        reply_markup=keyboard,
+        keyboard,
     )
     await callback.answer()
 

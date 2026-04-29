@@ -11,7 +11,7 @@ from config.settings import settings
 from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
-from src.models.models import Category, Event, Organization, User
+from src.models.models import Event, Organization, User
 
 
 async def get_my_events(body: Dict[str, Any]) -> None:
@@ -35,12 +35,11 @@ async def get_my_events(body: Dict[str, Any]) -> None:
                     response_body = {"events": []}
                 else:
                     events_result = await db.execute(
-                        select(Event, Category.name)
-                        .join(Category, Event.category_id == Category.id)
+                        select(Event)
                         .where(Event.organization_id == organization.id)
                         .order_by(Event.id)
                     )
-                    rows = events_result.all()
+                    events = events_result.scalars().all()
                     response_body = {
                         "events": [
                             {
@@ -49,11 +48,11 @@ async def get_my_events(body: Dict[str, Any]) -> None:
                                 "description": event.description,
                                 "min_age": event.min_age,
                                 "city": event.city,
+                                "direction": event.direction,
                                 "start_time": event.start_time.strftime("%d.%m.%Y %H:%M"),
                                 "duration_hours": event.duration_hours,
-                                "category": category_name,
                             }
-                            for event, category_name in rows
+                            for event in events
                         ]
                     }
     except (SQLAlchemyError, ValueError, TypeError):
