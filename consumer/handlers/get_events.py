@@ -14,6 +14,8 @@ from consumer.storage import rabbit
 from consumer.storage.db import async_session
 from src.models.models import Event, Organization
 
+MOSCOW_OFFSET_HOURS = 3
+
 
 async def get_events(body: Dict[str, Any]) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
@@ -26,11 +28,23 @@ async def get_events(body: Dict[str, Any]) -> None:
         directions = [d for d in filters.get("directions", []) if d]
         date_from_text = (filters.get("date_from") or "").strip()
         date_to_text = (filters.get("date_to") or "").strip()
+        organization_id = filters.get("organization_id")
 
         async with async_session() as db:
+            now = datetime.utcnow() + timedelta(hours=MOSCOW_OFFSET_HOURS)
+            outdated_result = await db.execute(
+                select(Event).where(Event.is_finished.is_(False), Event.start_time < now)
+            )
+            outdated = outdated_result.scalars().all()
+            for item in outdated:
+                item.is_finished = True
+            if outdated:
+                await db.commit()
+
             query = (
                 select(Event, Organization.name)
                 .join(Organization, Event.organization_id == Organization.id)
+                .where(Event.is_finished.is_(False))
                 .order_by(Event.start_time, Event.id)
             )
             if cities:
@@ -39,6 +53,8 @@ async def get_events(body: Dict[str, Any]) -> None:
                 query = query.where(
                     or_(*[Event.direction.ilike(f"%{direction}%") for direction in directions])
                 )
+            if organization_id:
+                query = query.where(Event.organization_id == int(organization_id))
             if date_from_text and date_to_text:
                 date_from = datetime.strptime(date_from_text, "%d.%m.%Y").date()
                 date_to = datetime.strptime(date_to_text, "%d.%m.%Y").date()

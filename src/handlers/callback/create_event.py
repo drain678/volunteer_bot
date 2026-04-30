@@ -32,6 +32,12 @@ FILTER_DIRECTIONS = [
 ]
 
 
+async def _safe_edit_message(
+    message: Message, text: str, reply_markup: InlineKeyboardMarkup | None = None
+) -> None:
+    await message.edit_text(text, reply_markup=reply_markup)
+
+
 def _direction_more_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -43,7 +49,9 @@ def _direction_more_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def _directions_keyboard(directions: list[str], page: int) -> InlineKeyboardMarkup:
+def _directions_keyboard(
+    directions: list[str], page: int, show_cancel: bool = False
+) -> InlineKeyboardMarkup:
     page_size = 4
     pages = max(1, (len(directions) + page_size - 1) // page_size)
     page = page % pages
@@ -65,12 +73,17 @@ def _directions_keyboard(directions: list[str], page: int) -> InlineKeyboardMark
 
     prev_page = (page - 1) % pages
     next_page = (page + 1) % pages
-    rows.append(
-        [
-            InlineKeyboardButton(text="⬅️", callback_data=f"event_direction_page_{prev_page}"),
-            InlineKeyboardButton(text="➡️", callback_data=f"event_direction_page_{next_page}"),
-        ]
+    controls = [
+        InlineKeyboardButton(text="⬅️", callback_data=f"event_direction_page_{prev_page}")
+    ]
+    if show_cancel:
+        controls.append(
+            InlineKeyboardButton(text="Отменить выбор", callback_data="event_direction_cancel")
+        )
+    controls.append(
+        InlineKeyboardButton(text="➡️", callback_data=f"event_direction_page_{next_page}")
     )
+    rows.append(controls)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -143,8 +156,8 @@ async def event_min_age(message: Message, state: FSMContext) -> None:
         await message.answer("Минимальный возраст должен быть числом.")
         return
     min_age = int(text)
-    if min_age < 0 or min_age > 100:
-        await message.answer("Укажи возраст в диапазоне 0-100.")
+    if min_age < 14 or min_age > 100:
+        await message.answer("Укажи возраст в диапазоне 14-100.")
         return
     await state.update_data(min_age=min_age)
     await state.set_state(CreateEventState.city)
@@ -194,7 +207,7 @@ async def event_duration(message: Message, state: FSMContext) -> None:
     await state.update_data(event_directions=FILTER_DIRECTIONS, selected_directions=[])
     await message.answer(
         "Выберите направление:",
-        reply_markup=_directions_keyboard(FILTER_DIRECTIONS, page=0),
+        reply_markup=_directions_keyboard(FILTER_DIRECTIONS, page=0, show_cancel=False),
     )
 
 
@@ -205,6 +218,7 @@ async def event_duration(message: Message, state: FSMContext) -> None:
 async def event_direction_page(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     directions = data.get("event_directions", [])
+    selected_directions = list(data.get("selected_directions", []))
     if not directions:
         await callback.answer("Направления не найдены", show_alert=True)
         return
@@ -214,7 +228,9 @@ async def event_direction_page(callback: CallbackQuery, state: FSMContext) -> No
         await callback.answer("Некорректная страница", show_alert=True)
         return
     await callback.message.edit_reply_markup(
-        reply_markup=_directions_keyboard(directions, page=page)
+        reply_markup=_directions_keyboard(
+            directions, page=page, show_cancel=bool(selected_directions)
+        )
     )
     await callback.answer()
 
@@ -246,14 +262,34 @@ async def event_direction_pick(callback: CallbackQuery, state: FSMContext) -> No
 
 
 @router.callback_query(
+    StateFilter(CreateEventState.category),
+    lambda c: c.data == "event_direction_cancel",
+)
+async def event_direction_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    event_data = await state.get_data()
+    selected_directions = list(event_data.get("selected_directions", []))
+    if not selected_directions:
+        await callback.answer("Сначала выберите хотя бы одно направление", show_alert=True)
+        return
+    await state.set_state(CreateEventState.direction_more)
+    await _safe_edit_message(
+        callback.message,
+        "Хотите еще выбрать направление?",
+        reply_markup=_direction_more_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(
     StateFilter(CreateEventState.direction_more),
     lambda c: c.data == "event_direction_more_yes",
 )
 async def event_direction_more_yes(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(CreateEventState.category)
-    await callback.message.answer(
+    await _safe_edit_message(
+        callback.message,
         "Выберите направление:",
-        reply_markup=_directions_keyboard(FILTER_DIRECTIONS, page=0),
+        reply_markup=_directions_keyboard(FILTER_DIRECTIONS, page=0, show_cancel=True),
     )
     await callback.answer()
 

@@ -38,6 +38,11 @@ def build_menu_by_role(role: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="Топы", callback_data="tops"),
                 InlineKeyboardButton(text="Профиль", callback_data="profile"),
             ],
+            [
+                InlineKeyboardButton(
+                    text="Мои мероприятия", callback_data="volunteer_my_events"
+                )
+            ],
         ]
     )
 

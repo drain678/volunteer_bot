@@ -29,7 +29,12 @@ async def create_event(body: Dict[str, Any]) -> None:
         duration_hours = float(body.get("duration_hours"))
         start_time = datetime.strptime(body.get("start_time"), "%d.%m.%Y %H:%M")
 
-        if not all([title, description, city, direction]) or duration_hours <= 0:
+        if (
+            not all([title, description, city, direction])
+            or duration_hours <= 0
+            or min_age < 14
+            or min_age > 100
+        ):
             response_body = {"error": "invalid_event_data"}
         else:
             async with async_session() as db:

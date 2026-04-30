@@ -1,4 +1,5 @@
 import logging.config
+import re
 from typing import Any, Dict
 
 import aio_pika
@@ -12,6 +13,19 @@ from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
 from src.models.models import Organization, User
+
+
+def _normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    has_plus = phone.startswith("+")
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits}" if has_plus else digits
+
+
+def _is_valid_phone(phone: str) -> bool:
+    if phone.startswith("+"):
+        return bool(re.fullmatch(r"^\+7\d{10}$", phone))
+    return bool(re.fullmatch(r"^8\d{10}$", phone))
 
 
 async def update_organization(body: Dict[str, Any]) -> None:
@@ -43,10 +57,17 @@ async def update_organization(body: Dict[str, Any]) -> None:
                         "website",
                         "description",
                     }:
-                        setattr(organization, field, value)
                         if field == "representative_phone":
-                            user.phone = value
-                        logger.info("ПРОФИЛЬ ОРГАНИЗАЦИИ ОБНОВЛЕН", extra={"body": body.get("id")})
+                            value = _normalize_phone(str(value))
+                            if not _is_valid_phone(value):
+                                response_body = {"error": "invalid_phone"}
+                        if response_body is not None:
+                            pass
+                        else:
+                            setattr(organization, field, value)
+                            if field == "representative_phone":
+                                user.phone = value
+                            logger.info("ПРОФИЛЬ ОРГАНИЗАЦИИ ОБНОВЛЕН", extra={"body": body.get("id")})
                     else:
                         response_body = {"error": "invalid_field"}
 

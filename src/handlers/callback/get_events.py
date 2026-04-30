@@ -170,8 +170,18 @@ def _ask_more_direction_keyboard() -> InlineKeyboardMarkup:
 
 async def _show_event_by_index(callback: CallbackQuery, state: FSMContext, index: int) -> None:
     applied, _ = await _get_filters(state)
+    data = await state.get_data()
+    base = data.get("event_filters_base") or {}
+    merged_filters = {
+        "cities": list(applied.get("cities", [])),
+        "directions": list(applied.get("directions", [])),
+        "date_from": applied.get("date_from", ""),
+        "date_to": applied.get("date_to", ""),
+    }
+    if base.get("organization_id"):
+        merged_filters["organization_id"] = base["organization_id"]
     response = await _request_to_consumer(
-        callback.from_user.id, "get_events", {"filters": applied}
+        callback.from_user.id, "get_events", {"filters": merged_filters}
     )
     if not response or "error" in response:
         await callback.answer("Не удалось получить список мероприятий", show_alert=True)
@@ -198,7 +208,11 @@ async def _show_filters(callback: CallbackQuery) -> None:
 
 @router.callback_query(lambda c: c.data == "events")
 async def get_events(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.update_data(event_filters_applied=_empty_filters(), event_filters_draft=_empty_filters())
+    await state.update_data(
+        event_filters_base={},
+        event_filters_applied=_empty_filters(),
+        event_filters_draft=_empty_filters(),
+    )
     await _show_event_by_index(callback, state, index=0)
 
 
@@ -372,8 +386,18 @@ async def participate_event(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     applied, _ = await _get_filters(state)
+    data = await state.get_data()
+    base = data.get("event_filters_base") or {}
+    merged_filters = {
+        "cities": list(applied.get("cities", [])),
+        "directions": list(applied.get("directions", [])),
+        "date_from": applied.get("date_from", ""),
+        "date_to": applied.get("date_to", ""),
+    }
+    if base.get("organization_id"):
+        merged_filters["organization_id"] = base["organization_id"]
     events_response = await _request_to_consumer(
-        callback.from_user.id, "get_events", {"filters": applied}
+        callback.from_user.id, "get_events", {"filters": merged_filters}
     )
     if not events_response or "error" in events_response:
         await callback.answer("Не удалось получить мероприятия", show_alert=True)
@@ -388,6 +412,17 @@ async def participate_event(callback: CallbackQuery, state: FSMContext) -> None:
         callback.from_user.id, "participate_event", {"event_id": event.get("id")}
     )
     if not response or "error" in response:
+        if response and response.get("error") == "already_rejected_same_profile":
+            event_title = response.get("event_title") or (event.get("title") or "это мероприятие")
+            await callback.message.answer(
+                f"Ваша заявка на мероприятие «{event_title}» уже была отклонена."
+            )
+            await callback.answer()
+            return
+        if response and response.get("error") == "event_finished":
+            await callback.message.answer("Это мероприятие уже завершено.")
+            await callback.answer()
+            return
         if response and response.get("error") == "age_restriction":
             required_min_age = response.get("required_min_age")
             await callback.message.answer(
@@ -436,14 +471,16 @@ async def participate_event(callback: CallbackQuery, state: FSMContext) -> None:
                 ),
                 reply_markup=keyboard,
             )
-            await callback.answer("Заявка на участие отправлена", show_alert=True)
+            await callback.message.answer("Заявка на участие отправлена.")
+            await callback.answer()
             return
         except TelegramBadRequest:
-            await callback.answer(
+            await callback.message.answer(
                 "Заявка создана, но организатору не удалось отправить сообщение. "
                 "Пусть организатор напишет боту /start.",
-                show_alert=True,
             )
+            await callback.answer()
             return
 
-    await callback.answer("Заявка на участие отправлена", show_alert=True)
+    await callback.message.answer("Заявка на участие отправлена.")
+    await callback.answer()

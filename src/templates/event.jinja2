@@ -1,4 +1,4 @@
-<b>{{ event.title }}</b>
+<b>{{ event.title }}{% if event.is_finished %} (прошло){% endif %}</b>
 🏢 Организация: {{ event.organization_name }}
 📝 {{ event.description }}
 📍 Город: {{ event.city }}

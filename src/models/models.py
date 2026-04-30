@@ -18,6 +18,9 @@ class User(Base):
     gender: Mapped[str] = mapped_column(nullable=True)
     city: Mapped[str] = mapped_column(nullable=True)
     phone: Mapped[str] = mapped_column(nullable=True)
+    visited_events_count: Mapped[int] = mapped_column(default=0)
+    hours_total: Mapped[float] = mapped_column(default=0.0)
+    rating: Mapped[float] = mapped_column(default=0.0)
 
     profile_filled: Mapped[bool] = mapped_column(default=False)
 
@@ -37,6 +40,9 @@ class User(Base):
             "gender": self.gender,
             "city": self.city,
             "phone": self.phone,
+            "visited_events_count": self.visited_events_count,
+            "hours_total": self.hours_total,
+            "rating": self.rating,
             "profile_filled": self.profile_filled,
             "role": self.role,
             "is_blocked": self.is_blocked,
@@ -78,6 +84,7 @@ class Event(Base):
 
     start_time: Mapped[datetime]
     duration_hours: Mapped[float]
+    is_finished: Mapped[bool] = mapped_column(default=False)
 
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("public.organizations.id", ondelete="CASCADE")
@@ -106,6 +113,7 @@ class Participation(Base):
 
     status: Mapped[str] = mapped_column(default="pending")
     # pending / approved / rejected
+    profile_snapshot: Mapped[str] = mapped_column(default="")
 
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
@@ -113,17 +121,3 @@ class Participation(Base):
     event = relationship("Event", back_populates="participations")
 
 
-class VolunteerStats(Base):
-    __tablename__ = "volunteer_stats"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("public.users.id", ondelete="CASCADE"),
-        unique=True
-    )
-
-    events_count: Mapped[int] = mapped_column(default=0)
-    hours_total: Mapped[float] = mapped_column(default=0.0)
-
-    rating: Mapped[float] = mapped_column(default=0.0)

@@ -9,6 +9,8 @@ from . import (
     get_events,
     get_organization,
     get_my_events,
+    get_tops,
+    get_volunteer_my_events,
     get_organizations,
     get_profile,
     review_participation,

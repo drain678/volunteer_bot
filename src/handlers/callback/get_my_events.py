@@ -5,11 +5,13 @@ import msgpack
 from aio_pika import ExchangeType
 from aio_pika.exceptions import QueueEmpty
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
 from consumer.logger import LOGGING_CONFIG, logger
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.settings import settings
 from src.handlers.callback.router import router
+from src.handlers.state.delete_event import DeleteEventState
 from src.storage.rabbit import channel_pool
 from src.templates.env import render
 
@@ -62,7 +64,8 @@ def _my_events_keyboard(index: int, total: int) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="⬅️", callback_data=f"my_events_{prev_index}"),
                 InlineKeyboardButton(text="Участники", callback_data=f"my_event_participants_{index}"),
                 InlineKeyboardButton(text="➡️", callback_data=f"my_events_{next_index}"),
-            ]
+            ],
+            [InlineKeyboardButton(text="Удалить мероприятие", callback_data=f"my_event_delete_{index}")],
         ]
     )
 
@@ -150,3 +153,105 @@ async def get_event_participants(callback: CallbackQuery) -> None:
 
     await callback.message.answer("\n".join(lines))
     await callback.answer()
+
+
+def _delete_confirm_keyboard(index: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да", callback_data=f"my_event_delete_yes_{index}"),
+                InlineKeyboardButton(text="Нет", callback_data=f"my_event_delete_no_{index}"),
+            ]
+        ]
+    )
+
+
+@router.callback_query(
+    lambda c: c.data.startswith("my_event_delete_")
+    and not c.data.startswith("my_event_delete_yes_")
+    and not c.data.startswith("my_event_delete_no_")
+)
+async def start_delete_event(callback: CallbackQuery) -> None:
+    parts = callback.data.split("_")
+    if len(parts) != 4:
+        await callback.answer("Некорректный индекс", show_alert=True)
+        return
+    try:
+        index = int(parts[3])
+    except ValueError:
+        await callback.answer("Некорректный индекс", show_alert=True)
+        return
+    await callback.message.answer(
+        "Точно хотите удалить мероприятие?",
+        reply_markup=_delete_confirm_keyboard(index),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("my_event_delete_no_"))
+async def cancel_delete_event(callback: CallbackQuery) -> None:
+    await callback.message.answer("Удаление отменено.")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("my_event_delete_yes_"))
+async def confirm_delete_event(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        index = int(callback.data.rsplit("_", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректный индекс", show_alert=True)
+        return
+    events_response = await _request_to_consumer(callback.from_user.id, "get_my_events")
+    if not events_response or "error" in events_response:
+        await callback.answer("Не удалось получить мероприятия", show_alert=True)
+        return
+    events = events_response.get("events", [])
+    if not events:
+        await callback.answer("У вас пока нет мероприятий", show_alert=True)
+        return
+    event = events[index % len(events)]
+    await state.set_state(DeleteEventState.waiting_reason)
+    await state.update_data(delete_event_id=event.get("id"), delete_event_title=event.get("title"))
+    await callback.message.answer(
+        "Если мероприятие еще не прошло, укажи причину отмены. "
+    )
+    await callback.answer()
+
+
+@router.message(DeleteEventState.waiting_reason)
+async def delete_event_with_reason(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    event_id = data.get("delete_event_id")
+    if not event_id:
+        await message.answer("Не удалось определить мероприятие.")
+        await state.clear()
+        return
+    reason = (message.text or "").strip()
+    if reason == "-":
+        reason = ""
+    response = await _request_to_consumer(
+        message.from_user.id,
+        "delete_event",
+        {"event_id": event_id, "reason": reason},
+    )
+    if not response or "error" in response:
+        if response and response.get("error") == "reason_required":
+            await message.answer("Для будущего мероприятия нужно указать причину отмены.")
+            return
+        await message.answer("Не удалось удалить мероприятие.")
+        await state.clear()
+        return
+
+    event_title = response.get("event_title") or data.get("delete_event_title") or "мероприятие"
+    notify_reason = response.get("reason") or "без указания причины"
+    volunteer_ids = response.get("volunteer_telegram_ids") or []
+    for volunteer_id in volunteer_ids:
+        try:
+            await message.bot.send_message(
+                volunteer_id,
+                f"Мероприятие «{event_title}» отменилось по причине: {notify_reason}",
+            )
+        except TelegramBadRequest:
+            pass
+    await message.answer("Мероприятие удалено.")
+    await state.clear()

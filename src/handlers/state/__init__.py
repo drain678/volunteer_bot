@@ -6,4 +6,5 @@ from .participation_review import ParticipationReviewState
 from .organization_filters import OrganizationFilterState
 from .edit_profile import EditProfileState
 from .edit_organization import EditOrganizationState
+from .delete_event import DeleteEventState
 

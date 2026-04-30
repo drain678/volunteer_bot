@@ -1,4 +1,5 @@
 import logging.config
+import re
 from typing import Any, Dict
 
 import aio_pika
@@ -12,6 +13,19 @@ from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
 from src.models.models import User
+
+
+def _normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    has_plus = phone.startswith("+")
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits}" if has_plus else digits
+
+
+def _is_valid_phone(phone: str) -> bool:
+    if phone.startswith("+"):
+        return bool(re.fullmatch(r"^\+7\d{10}$", phone))
+    return bool(re.fullmatch(r"^8\d{10}$", phone))
 
 
 async def update_profile(body: Dict[str, Any]) -> None:
@@ -29,9 +43,22 @@ async def update_profile(body: Dict[str, Any]) -> None:
                 response_body = {"error": "user_not_found"}
             else:
                 if field in {"name", "city", "gender", "phone"}:
-                    setattr(user, field, value)
+                    if field == "phone":
+                        value = _normalize_phone(str(value))
+                        if not _is_valid_phone(value):
+                            response_body = {"error": "invalid_phone"}
+                    if field == "gender" and value not in {"f", "m"}:
+                        response_body = {"error": "invalid_gender"}
+                    if response_body is not None:
+                        pass
+                    else:
+                        setattr(user, field, value)
                 elif field == "age":
-                    user.age = int(value)
+                    age_value = int(value)
+                    if age_value < 14 or age_value > 100:
+                        response_body = {"error": "invalid_age"}
+                    else:
+                        user.age = age_value
                 else:
                     response_body = {"error": "invalid_field"}
 

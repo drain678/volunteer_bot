@@ -1,4 +1,5 @@
 import logging.config
+import json
 from typing import Any, Dict
 
 import aio_pika
@@ -33,6 +34,8 @@ async def participate_event(body: Dict[str, Any]) -> None:
                 event = event_result.scalar_one_or_none()
                 if not event:
                     response_body = {"error": "event_not_found"}
+                elif event.is_finished:
+                    response_body = {"error": "event_finished"}
                 elif user.age is None or user.age < event.min_age:
                     response_body = {
                         "error": "age_restriction",
@@ -46,10 +49,56 @@ async def participate_event(body: Dict[str, Any]) -> None:
                         )
                     )
                     existing = existing_result.scalar_one_or_none()
+                    profile_snapshot = json.dumps(
+                        {
+                            "name": user.name or "",
+                            "age": user.age,
+                            "city": user.city or "",
+                            "phone": user.phone or "",
+                            "gender": user.gender or "",
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
                     if existing:
-                        response_body = {"error": "already_participating"}
+                        if existing.status == "approved":
+                            response_body = {"error": "already_participating"}
+                        elif (
+                            existing.status == "rejected"
+                            and existing.profile_snapshot == profile_snapshot
+                        ):
+                            response_body = {
+                                "error": "already_rejected_same_profile",
+                                "event_title": event.title,
+                            }
+                        else:
+                            existing.status = "pending"
+                            existing.profile_snapshot = profile_snapshot
+                            await db.commit()
+                            participation = existing
+                            organizer_result = await db.execute(
+                                select(User).where(User.id == event.created_by)
+                            )
+                            organizer = organizer_result.scalar_one_or_none()
+                            response_body = {
+                                "ok": True,
+                                "participation_id": participation.id,
+                                "event_title": event.title,
+                                "organizer_telegram_id": organizer.telegram_id if organizer else None,
+                                "volunteer": {
+                                    "name": user.name,
+                                    "age": user.age,
+                                    "city": user.city,
+                                    "phone": user.phone,
+                                    "gender": user.gender,
+                                },
+                            }
                     else:
-                        participation = Participation(user_id=user.id, event_id=event.id)
+                        participation = Participation(
+                            user_id=user.id,
+                            event_id=event.id,
+                            profile_snapshot=profile_snapshot,
+                        )
                         db.add(participation)
                         await db.flush()
                         await db.commit()

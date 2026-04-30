@@ -11,6 +11,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from consumer.logger import LOGGING_CONFIG, logger
 
 from config.settings import settings
+from src.handlers.callback.get_events import _events_keyboard
+from src.handlers.callback.get_events import _request_to_consumer as _request_events_to_consumer
+from src.handlers.callback.get_events import _empty_filters as _empty_event_filters
 from src.handlers.callback.router import router
 from src.handlers.state.organization_filters import OrganizationFilterState
 from src.storage.rabbit import channel_pool
@@ -273,6 +276,57 @@ async def paginate_organizations(callback: CallbackQuery, state: FSMContext) -> 
         await callback.answer("Некорректный индекс", show_alert=True)
         return
     await _show_organization_by_index(callback, state, index=index)
+
+
+@router.callback_query(lambda c: c.data.startswith("organization_events_"))
+async def organization_events(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        index = int(callback.data.split("_", 2)[2])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректный индекс", show_alert=True)
+        return
+
+    applied, _ = await _get_filters(state)
+    response = await _request_to_consumer(callback.from_user.id, applied)
+    if not response or "error" in response:
+        await callback.answer("Не удалось получить список организаций", show_alert=True)
+        return
+    organizations = response.get("organizations", [])
+    if not organizations:
+        await _safe_edit_message(callback.message, "Ничего не найдено")
+        await callback.answer()
+        return
+
+    organization = organizations[index % len(organizations)]
+    organization_id = organization.get("id")
+    organization_name = organization.get("organization_name") or "эта организация"
+    if not organization_id:
+        await callback.answer("Не удалось открыть мероприятия организации", show_alert=True)
+        return
+
+    await state.update_data(
+        event_filters_base={"organization_id": organization_id},
+        event_filters_applied=_empty_event_filters(),
+        event_filters_draft=_empty_event_filters(),
+    )
+    events_response = await _request_events_to_consumer(
+        callback.from_user.id,
+        "get_events",
+        {"filters": {"organization_id": organization_id}},
+    )
+    events = [] if not events_response or "error" in events_response else events_response.get("events", [])
+    if not events:
+        await callback.message.answer(
+            f"У организации {organization_name} пока нет мероприятий."
+        )
+        await callback.answer()
+        return
+    first_event = events[0]
+    await callback.message.answer(
+        render("event.jinja2", event=first_event),
+        reply_markup=_events_keyboard(index=0, total=len(events)),
+    )
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == "org_filters_open")

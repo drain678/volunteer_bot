@@ -43,6 +43,7 @@ async def get_organizations(body: Dict[str, Any]) -> None:
             response_body = {
                 "organizations": [
                     {
+                        "id": org.id,
                         "organization_name": org.name,
                         "city": org.city,
                         "direction": org.direction,

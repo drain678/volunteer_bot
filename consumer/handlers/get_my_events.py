@@ -11,7 +11,11 @@ from config.settings import settings
 from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
+from datetime import datetime, timedelta
+
 from src.models.models import Event, Organization, User
+
+MOSCOW_OFFSET_HOURS = 3
 
 
 async def get_my_events(body: Dict[str, Any]) -> None:
@@ -34,9 +38,26 @@ async def get_my_events(body: Dict[str, Any]) -> None:
                 if not organization:
                     response_body = {"events": []}
                 else:
+                    now = datetime.utcnow() + timedelta(hours=MOSCOW_OFFSET_HOURS)
+                    outdated_result = await db.execute(
+                        select(Event).where(
+                            Event.organization_id == organization.id,
+                            Event.is_finished.is_(False),
+                            Event.start_time < now,
+                        )
+                    )
+                    outdated = outdated_result.scalars().all()
+                    for item in outdated:
+                        item.is_finished = True
+                    if outdated:
+                        await db.commit()
+
                     events_result = await db.execute(
                         select(Event)
-                        .where(Event.organization_id == organization.id)
+                        .where(
+                            Event.organization_id == organization.id,
+                            Event.is_finished.is_(False),
+                        )
                         .order_by(Event.id)
                     )
                     events = events_result.scalars().all()

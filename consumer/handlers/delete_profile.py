@@ -11,7 +11,7 @@ from config.settings import settings
 from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
-from src.models.models import Event, Organization, Participation, User, VolunteerStats
+from src.models.models import Event, Organization, Participation, User
 
 
 async def delete_profile(body: Dict[str, Any]) -> None:
@@ -28,7 +28,6 @@ async def delete_profile(body: Dict[str, Any]) -> None:
                 response_body = {"error": "user_not_found"}
             else:
                 await db.execute(delete(Participation).where(Participation.user_id == user.id))
-                await db.execute(delete(VolunteerStats).where(VolunteerStats.user_id == user.id))
                 await db.execute(delete(Event).where(Event.created_by == user.id))
                 await db.execute(delete(Organization).where(Organization.created_by == user.id))
                 await db.delete(user)

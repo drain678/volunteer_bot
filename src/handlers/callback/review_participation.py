@@ -121,11 +121,17 @@ async def reject_participation_reason(message: Message, state: FSMContext) -> No
         return
 
     volunteer_tg = response.get("volunteer_telegram_id")
+    event_title = response.get("event_title") or "без названия"
+    if reason:
+        reject_text = (
+            "\n\nБлагодарим за проявленный интерес к мероприятию "
+            f"«{event_title}», но ваша заявка была отклонена по причине: {reason}"
+        )
     if volunteer_tg:
         try:
             await message.bot.send_message(
                 volunteer_tg,
-                f"Благодарим за проявленный интерес, но ваша заявка была отклонена по причине: {reason}",
+                reject_text,
             )
         except TelegramBadRequest:
             pass

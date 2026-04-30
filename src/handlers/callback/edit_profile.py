@@ -18,6 +18,20 @@ from src.handlers.state.edit_profile import EditProfileState
 from src.storage.rabbit import channel_pool
 
 
+def _normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    has_plus = phone.startswith("+")
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits}" if has_plus else digits
+
+
+def _is_valid_phone(phone: str) -> bool:
+    normalized = _normalize_phone(phone)
+    if normalized.startswith("+"):
+        return bool(re.fullmatch(r"^\+7\d{10}$", normalized))
+    return bool(re.fullmatch(r"^8\d{10}$", normalized))
+
+
 def edit_fields_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [
@@ -127,10 +141,18 @@ async def update_profile_value(message: Message, state: FSMContext) -> None:
     if field == "age" and not value.isdigit():
         await message.answer("Возраст должен быть числом.")
         return
-
-    if field == "phone" and not re.fullmatch(r"^\+?\d{11}$", value):
-        await message.answer("Телефон должен быть в формате 11 цифр или + и 11 цифр.")
+    if field == "age" and int(value) < 14:
+        await message.answer("Возраст волонтера не может быть меньше 14 лет.")
         return
+
+    if field == "phone" and not _is_valid_phone(value):
+        await message.answer(
+            "Телефон в формате +7 953 698 6160, 8 953 698 6160, "
+            "+7 (953) 698-61-60 или 8 (953) 698-61-60."
+        )
+        return
+    if field == "phone":
+        value = _normalize_phone(value)
 
     result = await request_to_consumer(
         {
