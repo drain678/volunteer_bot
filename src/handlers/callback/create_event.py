@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config.settings import settings
 from src.handlers.callback.router import router
 from src.handlers.state.create_event import CreateEventState
+from aiogram.exceptions import TelegramBadRequest
 from src.storage.rabbit import channel_pool
 from src.templates.env import render
 from consumer.logger import LOGGING_CONFIG, logger
@@ -220,7 +221,7 @@ async def event_direction_page(callback: CallbackQuery, state: FSMContext) -> No
     directions = data.get("event_directions", [])
     selected_directions = list(data.get("selected_directions", []))
     if not directions:
-        await callback.answer("Направления не найдены", show_alert=True)
+        await callback.answer("Направления мероприятий не найдены", show_alert=True)
         return
     try:
         page = int(callback.data.rsplit("_", 1)[1])
@@ -326,5 +327,27 @@ async def event_direction_more_no(callback: CallbackQuery, state: FSMContext) ->
 
     await callback.message.answer("Мероприятие успешно создано!")
     await callback.message.answer(render("my_event.jinja2", event=create_response))
+    notify_volunteer_ids = create_response.get("notify_volunteer_ids") or []
+    event_id = create_response.get("id")
+    if event_id:
+        notify_keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Участвовать", callback_data=f"participate_event_{event_id}"
+                    )
+                ]
+            ]
+        )
+        for volunteer_id in notify_volunteer_ids:
+            try:
+                await callback.bot.send_message(volunteer_id, "Появилось новое мероприятие")
+                await callback.bot.send_message(
+                    volunteer_id,
+                    render("event.jinja2", event=create_response),
+                    reply_markup=notify_keyboard,
+                )
+            except TelegramBadRequest:
+                continue
     await state.clear()
     await callback.answer()

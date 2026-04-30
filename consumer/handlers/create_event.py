@@ -15,6 +15,10 @@ from consumer.storage.db import async_session
 from src.models.models import Event, Organization, User
 
 
+def _split_csv(value: str) -> list[str]:
+    return [item.strip().lower() for item in value.split(",") if item.strip()]
+
+
 async def create_event(body: Dict[str, Any]) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
     user_id = int(body.get("id"))
@@ -66,9 +70,31 @@ async def create_event(body: Dict[str, Any]) -> None:
                         )
                         db.add(event)
                         await db.commit()
+                        event_directions = {item.strip().lower() for item in direction.split(",") if item.strip()}
+                        volunteers_result = await db.execute(
+                            select(User).where(User.role == "volunteer", User.profile_filled.is_(True))
+                        )
+                        volunteers = volunteers_result.scalars().all()
+                        recipient_ids: list[int] = []
+                        event_city_lower = city.lower()
+                        for volunteer in volunteers:
+                            city_match = volunteer.all_cities or event_city_lower in set(
+                                _split_csv(volunteer.preferred_cities or "")
+                            )
+                            if not city_match:
+                                continue
+                            direction_match = volunteer.all_directions or bool(
+                                event_directions.intersection(
+                                    set(_split_csv(volunteer.preferred_directions or ""))
+                                )
+                            )
+                            if not direction_match:
+                                continue
+                            recipient_ids.append(int(volunteer.telegram_id))
                         logger.info("БД СДЕЛАЛА МЕРОПРИЯТИЕ", extra={"body": user_id})
 
                         response_body = {
+                            "id": event.id,
                             "title": event.title,
                             "description": event.description,
                             "min_age": event.min_age,
@@ -76,6 +102,8 @@ async def create_event(body: Dict[str, Any]) -> None:
                             "direction": event.direction,
                             "start_time": event.start_time.strftime("%d.%m.%Y %H:%M"),
                             "duration_hours": event.duration_hours,
+                            "organization_name": organization.name,
+                            "notify_volunteer_ids": recipient_ids,
                         }
     except (SQLAlchemyError, ValueError, TypeError):
         logger.exception("ОШИБКА СОЗДАНИЯ МЕРОПРИЯТИЯ")

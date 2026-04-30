@@ -8,3 +8,6 @@
 🏆 Посещено мероприятий: {{ user.visited_events_count or 0 }}
 ⏱ Количество часов: {{ user.hours_total or 0 }}
 ⭐ Рейтинг: {{ user.rating or 0 }}
+Предпочтения мероприятий:
+🏙 Города: {{ 'все' if user.all_cities else (user.preferred_cities or 'не выбраны') }}
+🌐 Направления мероприятий: {{ 'все' if user.all_directions else (user.preferred_directions or 'не выбраны') }}

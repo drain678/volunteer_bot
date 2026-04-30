@@ -18,6 +18,10 @@ class User(Base):
     gender: Mapped[str] = mapped_column(nullable=True)
     city: Mapped[str] = mapped_column(nullable=True)
     phone: Mapped[str] = mapped_column(nullable=True)
+    preferred_cities: Mapped[str] = mapped_column(default="")
+    preferred_directions: Mapped[str] = mapped_column(default="")
+    all_cities: Mapped[bool] = mapped_column(default=False)
+    all_directions: Mapped[bool] = mapped_column(default=False)
     visited_events_count: Mapped[int] = mapped_column(default=0)
     hours_total: Mapped[float] = mapped_column(default=0.0)
     rating: Mapped[float] = mapped_column(default=0.0)
@@ -40,6 +44,10 @@ class User(Base):
             "gender": self.gender,
             "city": self.city,
             "phone": self.phone,
+            "preferred_cities": self.preferred_cities,
+            "preferred_directions": self.preferred_directions,
+            "all_cities": self.all_cities,
+            "all_directions": self.all_directions,
             "visited_events_count": self.visited_events_count,
             "hours_total": self.hours_total,
             "rating": self.rating,

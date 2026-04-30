@@ -39,6 +39,10 @@ async def create_profile(body: Dict[str, Any]) -> None:
     city = (body.get("city") or "").strip()
     phone = _normalize_phone((body.get("phone") or "").strip())
     gender = body.get("gender")
+    all_cities = bool(body.get("all_cities"))
+    all_directions = bool(body.get("all_directions"))
+    preferred_cities = (body.get("preferred_cities") or "").strip()
+    preferred_directions = (body.get("preferred_directions") or "").strip()
 
     try:
         age = int(body.get("age"))
@@ -54,6 +58,8 @@ async def create_profile(body: Dict[str, Any]) -> None:
         or age is None
         or age < 14
         or age > 100
+        or (not all_cities and not preferred_cities)
+        or (not all_directions and not preferred_directions)
     ):
         response_body = {"error": "invalid_profile_data"}
     else:
@@ -73,6 +79,10 @@ async def create_profile(body: Dict[str, Any]) -> None:
                         gender=gender,
                         city=city,
                         phone=phone,
+                        all_cities=all_cities,
+                        all_directions=all_directions,
+                        preferred_cities=preferred_cities,
+                        preferred_directions=preferred_directions,
                         profile_filled=True,
                     )
                     db.add(user)
@@ -83,6 +93,10 @@ async def create_profile(body: Dict[str, Any]) -> None:
                     user.gender = gender
                     user.city = city
                     user.phone = phone
+                    user.all_cities = all_cities
+                    user.all_directions = all_directions
+                    user.preferred_cities = preferred_cities
+                    user.preferred_directions = preferred_directions
                     user.profile_filled = True
 
                 await db.commit()
@@ -96,6 +110,10 @@ async def create_profile(body: Dict[str, Any]) -> None:
                     "city": user.city,
                     "phone": user.phone,
                     "gender": gender,
+                    "all_cities": user.all_cities,
+                    "all_directions": user.all_directions,
+                    "preferred_cities": user.preferred_cities,
+                    "preferred_directions": user.preferred_directions,
                 }
         except SQLAlchemyError:
             logger.exception("ОШИБКА ПРИ СОЗДАНИИ ПРОФИЛЯ ВОЛОНТЕРА", extra={"body": body.get("id")})

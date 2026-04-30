@@ -377,7 +377,10 @@ async def reset_filters(callback: CallbackQuery, state: FSMContext) -> None:
     await _show_event_by_index(callback, state, index=0)
 
 
-@router.callback_query(lambda c: c.data.startswith("participate_"))
+@router.callback_query(
+    lambda c: c.data.startswith("participate_")
+    and not c.data.startswith("participate_event_")
+)
 async def participate_event(callback: CallbackQuery, state: FSMContext) -> None:
     try:
         index = int(callback.data.split("_", 1)[1])
@@ -478,6 +481,89 @@ async def participate_event(callback: CallbackQuery, state: FSMContext) -> None:
             await callback.message.answer(
                 "Заявка создана, но организатору не удалось отправить сообщение. "
                 "Пусть организатор напишет боту /start.",
+            )
+            await callback.answer()
+            return
+
+    await callback.message.answer("Заявка на участие отправлена.")
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("participate_event_"))
+async def participate_event_direct(callback: CallbackQuery) -> None:
+    try:
+        event_id = int(callback.data.split("_", 2)[2])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректное мероприятие", show_alert=True)
+        return
+    response = await _request_to_consumer(
+        callback.from_user.id, "participate_event", {"event_id": event_id}
+    )
+    if not response or "error" in response:
+        if response and response.get("error") == "already_rejected_same_profile":
+            event_title = response.get("event_title") or "это мероприятие"
+            await callback.message.answer(
+                f"Ваша заявка на мероприятие «{event_title}» уже была отклонена."
+            )
+            await callback.answer()
+            return
+        if response and response.get("error") == "already_participating":
+            await callback.message.answer("Вы уже участвуете в этом мероприятии.")
+            await callback.answer()
+            return
+        if response and response.get("error") == "age_restriction":
+            required_min_age = response.get("required_min_age")
+            await callback.message.answer(
+                "Вы не можете участвовать, потому что участие в мероприятии "
+                f"возможно с {required_min_age} лет."
+            )
+            await callback.answer()
+            return
+        await callback.message.answer("Не удалось записаться на мероприятие.")
+        await callback.answer()
+        return
+
+    volunteer = response.get("volunteer") or {}
+    participation_id = response.get("participation_id")
+    organizer_tg = response.get("organizer_telegram_id")
+    event_title = response.get("event_title") or "мероприятие"
+    if organizer_tg and participation_id:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Принять заявку",
+                        callback_data=f"participation_approve_{participation_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="Отклонить заявку",
+                        callback_data=f"participation_reject_{participation_id}",
+                    ),
+                ]
+            ]
+        )
+        try:
+            await callback.bot.send_message(organizer_tg, "У вас новая заявка на участие")
+            await callback.bot.send_message(
+                organizer_tg,
+                (
+                    "<b>Профиль</b>\n\n"
+                    f"👤 Имя: {volunteer.get('name')}\n"
+                    f"🎂 Возраст: {volunteer.get('age')}\n"
+                    f"📍 Город: {volunteer.get('city')}\n"
+                    f"📞 Телефон: {volunteer.get('phone')}\n"
+                    f"⚧ Пол: {'Ж' if volunteer.get('gender') == 'f' else 'М'}\n"
+                    f"🎯 Мероприятие: {event_title}"
+                ),
+                reply_markup=keyboard,
+            )
+            await callback.message.answer("Заявка на участие отправлена.")
+            await callback.answer()
+            return
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "Заявка создана, но организатору не удалось отправить сообщение. "
+                "Пусть организатор напишет боту /start."
             )
             await callback.answer()
             return

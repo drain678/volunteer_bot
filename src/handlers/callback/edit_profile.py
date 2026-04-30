@@ -17,6 +17,21 @@ from src.handlers.state.create_profile import VolunteerProfileState
 from src.handlers.state.edit_profile import EditProfileState
 from src.storage.rabbit import channel_pool
 
+FILTER_DIRECTIONS = [
+    "Здравоохранение",
+    "ЧС",
+    "Ветераны",
+    "Дети и молодежь",
+    "Спорт",
+    "Животные",
+    "Старшее поколение",
+    "Люди с ОВЗ",
+    "Экология",
+    "Культура и искусство",
+    "Поиск пропавших",
+    "Образование",
+]
+
 
 def _normalize_phone(phone: str) -> str:
     phone = phone.strip()
@@ -42,6 +57,10 @@ def edit_fields_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Город", callback_data="edit_field_city"),
             InlineKeyboardButton(text="Телефон", callback_data="edit_field_phone"),
         ],
+        [
+            InlineKeyboardButton(text="Города мероприятий", callback_data="edit_field_preferred_cities"),
+            InlineKeyboardButton(text="Направления мероприятий", callback_data="edit_field_preferred_directions"),
+        ],
     ]
     buttons.append(
         [InlineKeyboardButton(text="Создать профиль заново", callback_data="recreate_profile")]
@@ -59,6 +78,42 @@ def edit_more_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+def _yes_no_keyboard(yes_data: str, no_data: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да", callback_data=yes_data),
+                InlineKeyboardButton(text="Нет", callback_data=no_data),
+            ]
+        ]
+    )
+
+
+def _directions_keyboard(page: int, show_cancel: bool) -> InlineKeyboardMarkup:
+    page_size = 4
+    pages = max(1, (len(FILTER_DIRECTIONS) + page_size - 1) // page_size)
+    page = page % pages
+    start = page * page_size
+    chunk = FILTER_DIRECTIONS[start:start + page_size]
+
+    rows = [[InlineKeyboardButton(text="Выбрать все", callback_data="edit_pref_direction_all")]]
+    for i in range(0, len(chunk), 2):
+        row = []
+        for item in chunk[i:i + 2]:
+            idx = FILTER_DIRECTIONS.index(item)
+            row.append(InlineKeyboardButton(text=item, callback_data=f"edit_pref_direction_pick_{idx}"))
+        rows.append(row)
+
+    prev_page = (page - 1) % pages
+    next_page = (page + 1) % pages
+    controls = [InlineKeyboardButton(text="⬅️", callback_data=f"edit_pref_direction_page_{prev_page}")]
+    if show_cancel:
+        controls.append(InlineKeyboardButton(text="Отменить выбор", callback_data="edit_pref_direction_cancel"))
+    controls.append(InlineKeyboardButton(text="➡️", callback_data=f"edit_pref_direction_page_{next_page}"))
+    rows.append(controls)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def request_to_consumer(payload: dict) -> dict | None:
@@ -117,6 +172,23 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(lambda c: c.data.startswith("edit_field_"))
 async def choose_edit_field(callback: CallbackQuery, state: FSMContext) -> None:
     field = callback.data.replace("edit_field_", "", 1)
+    if field == "preferred_cities":
+        await state.set_state(EditProfileState.preferred_city_input)
+        await state.update_data(edit_pref_cities=[])
+        await callback.message.answer(
+            'Для какого города вы хотите видеть мероприятия? Если для всех, то напишите "все".'
+        )
+        await callback.answer()
+        return
+    if field == "preferred_directions":
+        await state.set_state(EditProfileState.preferred_direction_select)
+        await state.update_data(edit_pref_directions=[])
+        await callback.message.answer(
+            "Выберите интересующие направления мероприятий:",
+            reply_markup=_directions_keyboard(page=0, show_cancel=False),
+        )
+        await callback.answer()
+        return
     prompts = {
         "name": "Введи новое имя:",
         "age": "Введи новый возраст:",
@@ -153,7 +225,6 @@ async def update_profile_value(message: Message, state: FSMContext) -> None:
         return
     if field == "phone":
         value = _normalize_phone(value)
-
     result = await request_to_consumer(
         {
             "id": message.from_user.id,
@@ -168,6 +239,198 @@ async def update_profile_value(message: Message, state: FSMContext) -> None:
 
     await state.clear()
     await message.answer("Хочешь изменить что-то еще?", reply_markup=edit_more_keyboard())
+
+
+@router.message(EditProfileState.preferred_city_input)
+async def edit_pref_city_input(message: Message, state: FSMContext) -> None:
+    text = (message.text or "").strip()
+    if not text:
+        await message.answer("Город не должен быть пустым.")
+        return
+    if text.lower() == "все":
+        result = await request_to_consumer(
+            {"id": message.from_user.id, "action": "update_profile", "field": "all_cities", "value": True}
+        )
+        if not result or "error" in result:
+            await message.answer("Не удалось обновить профиль. Попробуй позже.")
+            return
+        result = await request_to_consumer(
+            {"id": message.from_user.id, "action": "update_profile", "field": "preferred_cities", "value": ""}
+        )
+        if not result or "error" in result:
+            await message.answer("Не удалось обновить профиль. Попробуй позже.")
+            return
+        await state.clear()
+        await message.answer("Хочешь изменить что-то еще?", reply_markup=edit_more_keyboard())
+        return
+
+    data = await state.get_data()
+    cities = list(data.get("edit_pref_cities", []))
+    if text.lower() not in {item.lower() for item in cities}:
+        cities.append(text)
+    await state.update_data(edit_pref_cities=cities)
+    await state.set_state(EditProfileState.preferred_city_more)
+    await message.answer(
+        "Хотите еще добавить город?",
+        reply_markup=_yes_no_keyboard("edit_pref_city_more_yes", "edit_pref_city_more_no"),
+    )
+
+
+@router.callback_query(
+    lambda c: c.data in {"edit_pref_city_more_yes", "edit_pref_city_more_no"}
+)
+async def edit_pref_city_more(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.data == "edit_pref_city_more_yes":
+        await state.set_state(EditProfileState.preferred_city_input)
+        await callback.message.answer("Введите еще город или напишите 'все'.")
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    cities = list(data.get("edit_pref_cities", []))
+    if not cities:
+        await callback.answer("Выберите хотя бы один город или 'все'.", show_alert=True)
+        return
+    result = await request_to_consumer(
+        {"id": callback.from_user.id, "action": "update_profile", "field": "all_cities", "value": False}
+    )
+    if not result or "error" in result:
+        await callback.message.answer("Не удалось обновить профиль. Попробуй позже.")
+        await callback.answer()
+        return
+    result = await request_to_consumer(
+        {
+            "id": callback.from_user.id,
+            "action": "update_profile",
+            "field": "preferred_cities",
+            "value": ", ".join(cities),
+        }
+    )
+    if not result or "error" in result:
+        await callback.message.answer("Не удалось обновить профиль. Попробуй позже.")
+        await callback.answer()
+        return
+    await state.clear()
+    await callback.message.answer("Хочешь изменить что-то еще?", reply_markup=edit_more_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(
+    lambda c: c.data.startswith("edit_pref_direction_page_")
+)
+async def edit_pref_direction_page(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        page = int(callback.data.rsplit("_", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректная страница", show_alert=True)
+        return
+    data = await state.get_data()
+    selected = list(data.get("edit_pref_directions", []))
+    await callback.message.edit_reply_markup(
+        reply_markup=_directions_keyboard(page=page, show_cancel=bool(selected))
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "edit_pref_direction_all")
+async def edit_pref_direction_all(callback: CallbackQuery, state: FSMContext) -> None:
+    result = await request_to_consumer(
+        {"id": callback.from_user.id, "action": "update_profile", "field": "all_directions", "value": True}
+    )
+    if not result or "error" in result:
+        await callback.message.answer("Не удалось обновить профиль. Попробуй позже.")
+        await callback.answer()
+        return
+    result = await request_to_consumer(
+        {"id": callback.from_user.id, "action": "update_profile", "field": "preferred_directions", "value": ""}
+    )
+    if not result or "error" in result:
+        await callback.message.answer("Не удалось обновить профиль. Попробуй позже.")
+        await callback.answer()
+        return
+    await state.clear()
+    await callback.message.answer("Хочешь изменить что-то еще?", reply_markup=edit_more_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data.startswith("edit_pref_direction_pick_"))
+async def edit_pref_direction_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        idx = int(callback.data.rsplit("_", 1)[1])
+        direction = FILTER_DIRECTIONS[idx]
+    except (ValueError, IndexError):
+        await callback.answer("Некорректное направление", show_alert=True)
+        return
+    data = await state.get_data()
+    selected = list(data.get("edit_pref_directions", []))
+    if direction not in selected:
+        selected.append(direction)
+    await state.update_data(edit_pref_directions=selected)
+    await state.set_state(EditProfileState.preferred_direction_more)
+    await callback.message.answer(
+        "Хотите еще выбрать направление?",
+        reply_markup=_yes_no_keyboard("edit_pref_direction_more_yes", "edit_pref_direction_more_no"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data == "edit_pref_direction_cancel")
+async def edit_pref_direction_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    selected = list(data.get("edit_pref_directions", []))
+    if not selected:
+        await callback.answer("Сначала выберите хотя бы одно направление", show_alert=True)
+        return
+    await state.set_state(EditProfileState.preferred_direction_more)
+    await callback.message.answer(
+        "Хотите еще выбрать направление?",
+        reply_markup=_yes_no_keyboard("edit_pref_direction_more_yes", "edit_pref_direction_more_no"),
+    )
+    await callback.answer()
+
+
+@router.callback_query(
+    lambda c: c.data in {"edit_pref_direction_more_yes", "edit_pref_direction_more_no"}
+)
+async def edit_pref_direction_more(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.data == "edit_pref_direction_more_yes":
+        await state.set_state(EditProfileState.preferred_direction_select)
+        data = await state.get_data()
+        selected = list(data.get("edit_pref_directions", []))
+        await callback.message.answer(
+            "Выберите интересующие направления мероприятий:",
+            reply_markup=_directions_keyboard(page=0, show_cancel=bool(selected)),
+        )
+        await callback.answer()
+        return
+
+    data = await state.get_data()
+    selected = list(data.get("edit_pref_directions", []))
+    if not selected:
+        await callback.answer("Выберите хотя бы одно направление или 'Выбрать все'", show_alert=True)
+        return
+    result = await request_to_consumer(
+        {"id": callback.from_user.id, "action": "update_profile", "field": "all_directions", "value": False}
+    )
+    if not result or "error" in result:
+        await callback.message.answer("Не удалось обновить профиль. Попробуй позже.")
+        await callback.answer()
+        return
+    result = await request_to_consumer(
+        {
+            "id": callback.from_user.id,
+            "action": "update_profile",
+            "field": "preferred_directions",
+            "value": ", ".join(selected),
+        }
+    )
+    if not result or "error" in result:
+        await callback.message.answer("Не удалось обновить профиль. Попробуй позже.")
+        await callback.answer()
+        return
+    await state.clear()
+    await callback.message.answer("Хочешь изменить что-то еще?", reply_markup=edit_more_keyboard())
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data == "edit_more_yes")

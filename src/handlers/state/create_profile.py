@@ -7,3 +7,7 @@ class VolunteerProfileState(StatesGroup):
     city = State()
     phone = State()
     gender = State()
+    preferred_city_input = State()
+    preferred_city_more = State()
+    preferred_direction_select = State()
+    preferred_direction_more = State()

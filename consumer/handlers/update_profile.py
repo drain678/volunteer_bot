@@ -42,13 +42,24 @@ async def update_profile(body: Dict[str, Any]) -> None:
             if not user:
                 response_body = {"error": "user_not_found"}
             else:
-                if field in {"name", "city", "gender", "phone"}:
+                if field in {
+                    "name",
+                    "city",
+                    "gender",
+                    "phone",
+                    "preferred_cities",
+                    "preferred_directions",
+                    "all_cities",
+                    "all_directions",
+                }:
                     if field == "phone":
                         value = _normalize_phone(str(value))
                         if not _is_valid_phone(value):
                             response_body = {"error": "invalid_phone"}
                     if field == "gender" and value not in {"f", "m"}:
                         response_body = {"error": "invalid_gender"}
+                    if field in {"all_cities", "all_directions"}:
+                        value = bool(value)
                     if response_body is not None:
                         pass
                     else:
