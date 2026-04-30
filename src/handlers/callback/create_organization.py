@@ -49,10 +49,26 @@ FILTER_TYPES = [
     "Школа",
 ]
 
+ADMIN_TELEGRAM_ID = 1200510460
+
 PENDING_ORGANIZATION_REQUESTS: dict[str, dict] = {}
 
 
-def _direction_keyboard(page: int) -> InlineKeyboardMarkup:
+def _normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    has_plus = phone.startswith("+")
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits}" if has_plus else digits
+
+
+def _is_valid_phone(phone: str) -> bool:
+    normalized = _normalize_phone(phone)
+    if normalized.startswith("+"):
+        return bool(re.fullmatch(r"^\+7\d{10}$", normalized))
+    return bool(re.fullmatch(r"^8\d{10}$", normalized))
+
+
+def _direction_keyboard(page: int, show_cancel: bool) -> InlineKeyboardMarkup:
     page_size = 4
     pages = max(1, (len(FILTER_DIRECTIONS) + page_size - 1) // page_size)
     page = page % pages
@@ -73,16 +89,17 @@ def _direction_keyboard(page: int) -> InlineKeyboardMarkup:
 
     prev_page = (page - 1) % pages
     next_page = (page + 1) % pages
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="⬅️", callback_data=f"create_org_direction_page_{prev_page}"
-            ),
-            InlineKeyboardButton(
-                text="➡️", callback_data=f"create_org_direction_page_{next_page}"
-            ),
-        ]
+    controls = [
+        InlineKeyboardButton(text="⬅️", callback_data=f"create_org_direction_page_{prev_page}")
+    ]
+    if show_cancel:
+        controls.append(
+            InlineKeyboardButton(text="Отменить выбор", callback_data="create_org_direction_clear")
+        )
+    controls.append(
+        InlineKeyboardButton(text="➡️", callback_data=f"create_org_direction_page_{next_page}")
     )
+    rows.append(controls)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -126,6 +143,16 @@ def _direction_more_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+
+async def _safe_edit_message(
+    message: Message, text: str, reply_markup: InlineKeyboardMarkup | None = None
+) -> None:
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
 
 
 def _moderation_keyboard(request_id: str) -> InlineKeyboardMarkup:
@@ -216,11 +243,14 @@ async def organization_representative_name(message: Message, state: FSMContext) 
 @router.message(OrganizationProfileState.representative_phone)
 async def organization_representative_phone(message: Message, state: FSMContext) -> None:
     representative_phone = (message.text or "").strip()
-    if not re.fullmatch(r"^\+?\d{11}$", representative_phone):
-        await message.answer("Телефон должен быть в формате 11 цифр или + и 11 цифр.")
+    if not _is_valid_phone(representative_phone):
+        await message.answer(
+            "Телефон в формате +7 953 698 6160, 8 953 698 6160, "
+            "+7 (953) 698-61-60 или 8 (953) 698-61-60."
+        )
         return
 
-    await state.update_data(representative_phone=representative_phone)
+    await state.update_data(representative_phone=_normalize_phone(representative_phone))
     await state.set_state(OrganizationProfileState.website)
     await message.answer("Сайт организации?")
 
@@ -259,7 +289,7 @@ async def organization_city(message: Message, state: FSMContext) -> None:
     await state.set_state(OrganizationProfileState.direction_select)
     await message.answer(
         "Выберите направление:",
-        reply_markup=_direction_keyboard(0),
+        reply_markup=_direction_keyboard(0, show_cancel=False),
     )
 
 
@@ -267,13 +297,19 @@ async def organization_city(message: Message, state: FSMContext) -> None:
     StateFilter(OrganizationProfileState.direction_select),
     lambda c: c.data.startswith("create_org_direction_page_"),
 )
-async def organization_direction_page(callback: CallbackQuery) -> None:
+async def organization_direction_page(callback: CallbackQuery, state: FSMContext) -> None:
     try:
         page = int(callback.data.rsplit("_", 1)[1])
     except (ValueError, IndexError):
         await callback.answer("Некорректная страница", show_alert=True)
         return
-    await callback.message.answer("Выберите направление:", reply_markup=_direction_keyboard(page))
+    data = await state.get_data()
+    selected_directions = list(data.get("selected_directions", []))
+    await _safe_edit_message(
+        callback.message,
+        "Выберите направление:",
+        reply_markup=_direction_keyboard(page, show_cancel=bool(selected_directions)),
+    )
     await callback.answer()
 
 
@@ -295,7 +331,8 @@ async def organization_direction_pick(callback: CallbackQuery, state: FSMContext
         selected_directions.append(direction)
     await state.update_data(selected_directions=selected_directions)
     await state.set_state(OrganizationProfileState.direction_more)
-    await callback.message.answer(
+    await _safe_edit_message(
+        callback.message,
         "Хотите еще выбрать направление?",
         reply_markup=_direction_more_keyboard(),
     )
@@ -308,7 +345,11 @@ async def organization_direction_pick(callback: CallbackQuery, state: FSMContext
 )
 async def organization_direction_more_yes(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OrganizationProfileState.direction_select)
-    await callback.message.answer("Выберите направление:", reply_markup=_direction_keyboard(0))
+    await _safe_edit_message(
+        callback.message,
+        "Выберите направление:",
+        reply_markup=_direction_keyboard(0, show_cancel=True),
+    )
     await callback.answer()
 
 
@@ -318,7 +359,8 @@ async def organization_direction_more_yes(callback: CallbackQuery, state: FSMCon
 )
 async def organization_direction_more_no(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(OrganizationProfileState.type_select)
-    await callback.message.answer(
+    await _safe_edit_message(
+        callback.message,
         "Выберите тип организации:",
         reply_markup=_type_keyboard(0),
     )
@@ -335,9 +377,27 @@ async def organization_type_page(callback: CallbackQuery) -> None:
     except (ValueError, IndexError):
         await callback.answer("Некорректная страница", show_alert=True)
         return
-    await callback.message.answer(
+    await _safe_edit_message(
+        callback.message, "Выберите тип организации:", reply_markup=_type_keyboard(page)
+    )
+    await callback.answer()
+
+
+@router.callback_query(
+    StateFilter(OrganizationProfileState.direction_select),
+    lambda c: c.data == "create_org_direction_clear",
+)
+async def organization_direction_clear(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    selected_directions = list(data.get("selected_directions", []))
+    if not selected_directions:
+        await callback.answer("Сначала выберите хотя бы одно направление", show_alert=True)
+        return
+    await state.set_state(OrganizationProfileState.type_select)
+    await _safe_edit_message(
+        callback.message,
         "Выберите тип организации:",
-        reply_markup=_type_keyboard(page),
+        reply_markup=_type_keyboard(0),
     )
     await callback.answer()
 
@@ -375,10 +435,10 @@ async def organization_type_pick(callback: CallbackQuery, state: FSMContext) -> 
     PENDING_ORGANIZATION_REQUESTS[request_id] = body
     try:
         await callback.bot.send_message(
-            callback.from_user.id, "Новая заявка на профиль организатора"
+            ADMIN_TELEGRAM_ID, "Новая заявка на профиль организатора"
         )
         await callback.bot.send_message(
-            callback.from_user.id,
+            ADMIN_TELEGRAM_ID,
             render("profile_organization.jinja2", user=body),
             reply_markup=_moderation_keyboard(request_id),
         )

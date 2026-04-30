@@ -1,4 +1,5 @@
 import logging.config
+import re
 from typing import Any, Dict
 
 import aio_pika
@@ -14,6 +15,20 @@ from consumer.storage.db import async_session
 from src.models.models import User
 
 
+def _normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    has_plus = phone.startswith("+")
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits}" if has_plus else digits
+
+
+def _is_valid_phone(phone: str) -> bool:
+    normalized = _normalize_phone(phone)
+    if normalized.startswith("+"):
+        return bool(re.fullmatch(r"^\+7\d{10}$", normalized))
+    return bool(re.fullmatch(r"^8\d{10}$", normalized))
+
+
 async def create_profile(body: Dict[str, Any]) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
     logger.info("ПОЛУЧИЛИ ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ К БД", extra={"body": body.get("id")})
@@ -22,7 +37,7 @@ async def create_profile(body: Dict[str, Any]) -> None:
     role = "volunteer"
     name = (body.get("name") or "").strip()
     city = (body.get("city") or "").strip()
-    phone = (body.get("phone") or "").strip()
+    phone = _normalize_phone((body.get("phone") or "").strip())
     gender = body.get("gender")
 
     try:
@@ -30,7 +45,16 @@ async def create_profile(body: Dict[str, Any]) -> None:
     except (TypeError, ValueError):
         age = None
 
-    if not name or not city or not phone or gender not in {"f", "m"} or age is None:
+    if (
+        not name
+        or not city
+        or not phone
+        or not _is_valid_phone(phone)
+        or gender not in {"f", "m"}
+        or age is None
+        or age < 14
+        or age > 100
+    ):
         response_body = {"error": "invalid_profile_data"}
     else:
         try:

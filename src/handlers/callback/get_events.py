@@ -388,6 +388,14 @@ async def participate_event(callback: CallbackQuery, state: FSMContext) -> None:
         callback.from_user.id, "participate_event", {"event_id": event.get("id")}
     )
     if not response or "error" in response:
+        if response and response.get("error") == "age_restriction":
+            required_min_age = response.get("required_min_age")
+            await callback.message.answer(
+                "Вы не можете участвовать, потому что участие в мероприятии "
+                f"возможно с {required_min_age} лет."
+            )
+            await callback.answer()
+            return
         if response and response.get("error") == "already_participating":
             await callback.answer("Вы уже участвуете в этом мероприятии", show_alert=True)
             return

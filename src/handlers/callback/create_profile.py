@@ -19,6 +19,20 @@ from src.storage.rabbit import channel_pool
 from src.templates.env import render
 
 
+def _normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    has_plus = phone.startswith("+")
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits}" if has_plus else digits
+
+
+def _is_valid_phone(phone: str) -> bool:
+    normalized = _normalize_phone(phone)
+    if normalized.startswith("+"):
+        return bool(re.fullmatch(r"^\+7\d{10}$", normalized))
+    return bool(re.fullmatch(r"^8\d{10}$", normalized))
+
+
 @router.callback_query(lambda c: c.data in {"role_volunteer"})
 async def create_profile(callback: CallbackQuery, state: FSMContext) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
@@ -50,8 +64,8 @@ async def volunteer_age(message: Message, state: FSMContext) -> None:
         return
 
     age = int(age_text)
-    if age < 10 or age > 100:
-        await message.answer("Укажи возраст в диапазоне от 10 до 100.")
+    if age < 14 or age > 100:
+        await message.answer("Укажи возраст в диапазоне от 14 до 100.")
         return
 
     await state.update_data(age=age)
@@ -74,11 +88,14 @@ async def volunteer_city(message: Message, state: FSMContext) -> None:
 @router.message(VolunteerProfileState.phone)
 async def volunteer_phone(message: Message, state: FSMContext) -> None:
     phone = (message.text or "").strip()
-    if not re.fullmatch(r"^\+?\d{11}$", phone):
-        await message.answer("Телефон должен быть в формате 11 цифр или + и 11 цифр.")
+    if not _is_valid_phone(phone):
+        await message.answer(
+            "Телефон в формате +7 953 698 6160, 8 953 698 6160, "
+            "+7 (953) 698-61-60 или 8 (953) 698-61-60."
+        )
         return
 
-    await state.update_data(phone=phone)
+    await state.update_data(phone=_normalize_phone(phone))
     await state.set_state(VolunteerProfileState.gender)
 
     keyboard = InlineKeyboardMarkup(

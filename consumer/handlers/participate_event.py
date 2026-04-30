@@ -33,6 +33,11 @@ async def participate_event(body: Dict[str, Any]) -> None:
                 event = event_result.scalar_one_or_none()
                 if not event:
                     response_body = {"error": "event_not_found"}
+                elif user.age is None or user.age < event.min_age:
+                    response_body = {
+                        "error": "age_restriction",
+                        "required_min_age": event.min_age,
+                    }
                 else:
                     existing_result = await db.execute(
                         select(Participation).where(

@@ -15,6 +15,19 @@ from consumer.storage.db import async_session
 from src.models.models import Organization, User
 
 
+def _normalize_phone(phone: str) -> str:
+    phone = phone.strip()
+    has_plus = phone.startswith("+")
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    return f"+{digits}" if has_plus else digits
+
+
+def _is_valid_phone(phone: str) -> bool:
+    if phone.startswith("+"):
+        return bool(re.fullmatch(r"^\+7\d{10}$", phone))
+    return bool(re.fullmatch(r"^8\d{10}$", phone))
+
+
 async def create_organization_profile(body: Dict[str, Any]) -> None:
     logging.config.dictConfig(LOGGING_CONFIG)
     logger.info("ПОЛУЧИЛИ ЗАПРОС НА СОЗДАНИЕ ПРОФИЛЯ ОРГАНИЗАЦИИ К БД", extra={"body": body.get("id")})
@@ -29,13 +42,14 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
     direction = (body.get("direction") or "").strip()
     type_organization = (body.get("type_organization") or "").strip()
 
-    is_phone_valid = bool(re.fullmatch(r"^\+?\d{11}$", representative_phone))
+    normalized_phone = _normalize_phone(representative_phone)
+    is_phone_valid = _is_valid_phone(normalized_phone)
 
     if not all(
         [
             organization_name,
             representative_name,
-            representative_phone,
+            normalized_phone,
             website,
             description,
             city,
@@ -56,7 +70,7 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
                         telegram_id=user_id,
                         role="organizer",
                         name=representative_name,
-                        phone=representative_phone,
+                        phone=normalized_phone,
                         age=18,
                         profile_filled=True,
                     )
@@ -65,7 +79,7 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
                 else:
                     user.role = "organizer"
                     user.name = representative_name
-                    user.phone = representative_phone
+                    user.phone = normalized_phone
                     user.profile_filled = True
 
                 org_result = await db.execute(
@@ -80,7 +94,7 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
                         direction=direction,
                         type_organization=type_organization,
                         representative_name=representative_name,
-                        representative_phone=representative_phone,
+                        representative_phone=normalized_phone,
                         website=website,
                         created_by=user.id,
                     )
@@ -92,7 +106,7 @@ async def create_organization_profile(body: Dict[str, Any]) -> None:
                     organization.direction = direction
                     organization.type_organization = type_organization
                     organization.representative_name = representative_name
-                    organization.representative_phone = representative_phone
+                    organization.representative_phone = normalized_phone
                     organization.website = website
 
                 await db.commit()
