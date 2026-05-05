@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from src.handlers.callback.get_events import send_event_card
 from src.handlers.callback.get_my_events import send_my_event_card
+from src.handlers.callback.get_volunteer_my_events import send_volunteer_event_card
 from src.handlers.command.menu import build_menu_by_role
 from src.handlers.command.router import router
 from src.models.models import User
@@ -18,6 +19,25 @@ async def start(message: Message, state: FSMContext, command: CommandObject | No
     await state.set_state(None)
 
     deep_link_arg = (command.args or "").strip() if command else ""
+    if deep_link_arg.startswith("vmy_event_"):
+        parts = deep_link_arg.split("_")
+        if len(parts) == 5:
+            try:
+                kind = parts[2]
+                event_id = int(parts[3])
+                page = int(parts[4])
+            except ValueError:
+                await message.answer("Некорректная ссылка на мероприятие.")
+                return
+            opened = await send_volunteer_event_card(
+                message=message,
+                user_id=message.from_user.id,
+                kind=kind,
+                event_id=event_id,
+                page=page,
+            )
+            if opened:
+                return
     if deep_link_arg.startswith("event_"):
         parts = deep_link_arg.split("_")
         if len(parts) == 3:
