@@ -1,0 +1,7 @@
+<b>Организации</b> (страница {{ page }}/{{ total_pages }}, всего {{ total_organizations }})
+{% for organization in organizations %}
+<a href="{{ organization.link }}">{{ organization.organization_name }}</a>
+🏙 {{ organization.city }}
+🧭 {{ organization.direction }}
+🏢 {{ organization.type_organization }}
+{% endfor %}

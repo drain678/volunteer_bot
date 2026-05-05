@@ -11,8 +11,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from consumer.logger import LOGGING_CONFIG, logger
 
 from config.settings import settings
-from src.handlers.callback.get_events import _events_keyboard
-from src.handlers.callback.get_events import _request_to_consumer as _request_events_to_consumer
+from src.handlers.callback.get_events import _show_events_page
 from src.handlers.callback.get_events import _empty_filters as _empty_event_filters
 from src.handlers.callback.router import router
 from src.handlers.state.organization_filters import OrganizationFilterState
@@ -44,6 +43,7 @@ FILTER_TYPES = [
     "ССУЗ",
     "Школа",
 ]
+PAGE_SIZE = 4
 
 
 def _empty_filters() -> dict:
@@ -107,17 +107,98 @@ async def _request_to_consumer(user_id: int, filters: dict | None = None) -> dic
     return None
 
 
-def _organizations_keyboard(index: int, total: int) -> InlineKeyboardMarkup:
-    prev_index = (index - 1) % total
-    next_index = (index + 1) % total
+def _build_organization_link(bot_username: str | None, organization_id: int, page: int) -> str:
+    if bot_username:
+        return f"https://t.me/{bot_username}?start=org_{organization_id}_{page}"
+    return "https://t.me/"
+
+
+async def _get_organizations(user_id: int, filters: dict | None = None) -> list[dict] | None:
+    response = await _request_to_consumer(user_id, filters)
+    if not response or "error" in response:
+        return None
+    return response.get("organizations", [])
+
+
+async def send_organization_profile(
+    message: Message,
+    user_id: int,
+    organization_id: int,
+    page: int = 0,
+) -> bool:
+    organizations = await _get_organizations(user_id)
+    if organizations is None:
+        await message.answer("Не удалось получить организацию.")
+        return False
+    organization = next((org for org in organizations if int(org.get("id", -1)) == organization_id), None)
+    if not organization:
+        await message.answer("Организация не найдена.")
+        return False
+    await message.answer(
+        render("organization.jinja2", user=organization),
+        reply_markup=_organization_profile_keyboard(organization_id=organization_id, page=page),
+    )
+    return True
+
+
+async def _show_organizations_page(callback: CallbackQuery, state: FSMContext, page: int) -> None:
+    applied, _ = await _get_filters(state)
+    organizations = await _get_organizations(callback.from_user.id, applied)
+    if organizations is None:
+        await callback.answer("Не удалось получить список организаций", show_alert=True)
+        return
+    if not organizations:
+        await _safe_edit_message(callback.message, "Ничего не найдено")
+        await callback.answer()
+        return
+
+    total_pages = (len(organizations) + PAGE_SIZE - 1) // PAGE_SIZE
+    page = page % total_pages
+    start = page * PAGE_SIZE
+    chunk = organizations[start:start + PAGE_SIZE]
+    me = await callback.bot.get_me()
+    bot_username = me.username
+    prepared = []
+    for org in chunk:
+        item = dict(org)
+        item["link"] = _build_organization_link(bot_username, int(org["id"]), page)
+        prepared.append(item)
+    text = render(
+        "organizations_list.jinja2",
+        organizations=prepared,
+        page=page + 1,
+        total_pages=total_pages,
+        total_organizations=len(organizations),
+    )
+    await _safe_edit_message(
+        callback.message,
+        text,
+        reply_markup=_organizations_keyboard(page=page, total_pages=total_pages),
+    )
+    await callback.answer()
+
+
+def _organizations_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    prev_page = (page - 1) % total_pages
+    next_page = (page + 1) % total_pages
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Фильтры", callback_data="org_filters_open")],
             [
-                InlineKeyboardButton(text="⬅️", callback_data=f"organizations_{prev_index}"),
-                InlineKeyboardButton(text="Мероприятия", callback_data=f"organization_events_{index}"),
-                InlineKeyboardButton(text="➡️", callback_data=f"organizations_{next_index}"),
+                InlineKeyboardButton(text="⬅️", callback_data=f"organizations_page_{prev_page}"),
+                InlineKeyboardButton(text="➡️", callback_data=f"organizations_page_{next_page}"),
             ],
+        ]
+    )
+
+
+def _organization_profile_keyboard(organization_id: int, page: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Назад", callback_data=f"organizations_page_{page}"),
+                InlineKeyboardButton(text="Мероприятия", callback_data=f"organization_events_{organization_id}"),
+            ]
         ]
     )
 
@@ -224,31 +305,6 @@ def _ask_more_type_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def _show_organization_by_index(callback: CallbackQuery, state: FSMContext, index: int) -> None:
-    applied, _ = await _get_filters(state)
-    response = await _request_to_consumer(callback.from_user.id, applied)
-    if not response or "error" in response:
-        await callback.answer("Не удалось получить список организаций", show_alert=True)
-        return
-
-    organizations = response.get("organizations", [])
-    if not organizations:
-        await _safe_edit_message(callback.message, "Ничего не найдено")
-        await callback.answer()
-        return
-
-    index = index % len(organizations)
-    organization = organizations[index]
-    keyboard = _organizations_keyboard(index=index, total=len(organizations))
-
-    await _safe_edit_message(
-        callback.message,
-        render("organization.jinja2", user=organization),
-        reply_markup=keyboard,
-    )
-    await callback.answer()
-
-
 async def _show_filters(message: Message | CallbackQuery) -> None:
     target = message.message if isinstance(message, CallbackQuery) else message
     if isinstance(message, CallbackQuery):
@@ -265,43 +321,51 @@ async def get_organizations(callback: CallbackQuery, state: FSMContext) -> None:
         organization_filters_applied=_empty_filters(),
         organization_filters_draft=_empty_filters(),
     )
-    await _show_organization_by_index(callback, state, index=0)
+    await _show_organizations_page(callback, state, page=0)
 
 
-@router.callback_query(lambda c: c.data.startswith("organizations_"))
+@router.callback_query(lambda c: c.data.startswith("organizations_page_"))
 async def paginate_organizations(callback: CallbackQuery, state: FSMContext) -> None:
     try:
-        index = int(callback.data.split("_", 1)[1])
+        page = int(callback.data.rsplit("_", 1)[1])
     except (ValueError, IndexError):
-        await callback.answer("Некорректный индекс", show_alert=True)
+        await callback.answer("Некорректная страница", show_alert=True)
         return
-    await _show_organization_by_index(callback, state, index=index)
+    await _show_organizations_page(callback, state, page=page)
+
+
+@router.callback_query(lambda c: c.data.startswith("organization_open_"))
+async def open_organization_profile(callback: CallbackQuery, state: FSMContext) -> None:
+    try:
+        _, _, org_raw, page_raw = callback.data.split("_")
+        organization_id = int(org_raw)
+        page = int(page_raw)
+    except (ValueError, IndexError):
+        await callback.answer("Некорректная организация", show_alert=True)
+        return
+    applied, _ = await _get_filters(state)
+    organizations = await _get_organizations(callback.from_user.id, applied)
+    if organizations is None:
+        await callback.answer("Не удалось получить список организаций", show_alert=True)
+        return
+    organization = next((org for org in organizations if int(org.get("id", -1)) == organization_id), None)
+    if not organization:
+        await callback.answer("Организация не найдена", show_alert=True)
+        return
+    await _safe_edit_message(
+        callback.message,
+        render("organization.jinja2", user=organization),
+        reply_markup=_organization_profile_keyboard(organization_id=organization_id, page=page),
+    )
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data.startswith("organization_events_"))
 async def organization_events(callback: CallbackQuery, state: FSMContext) -> None:
     try:
-        index = int(callback.data.split("_", 2)[2])
+        organization_id = int(callback.data.split("_", 2)[2])
     except (ValueError, IndexError):
-        await callback.answer("Некорректный индекс", show_alert=True)
-        return
-
-    applied, _ = await _get_filters(state)
-    response = await _request_to_consumer(callback.from_user.id, applied)
-    if not response or "error" in response:
-        await callback.answer("Не удалось получить список организаций", show_alert=True)
-        return
-    organizations = response.get("organizations", [])
-    if not organizations:
-        await _safe_edit_message(callback.message, "Ничего не найдено")
-        await callback.answer()
-        return
-
-    organization = organizations[index % len(organizations)]
-    organization_id = organization.get("id")
-    organization_name = organization.get("organization_name") or "эта организация"
-    if not organization_id:
-        await callback.answer("Не удалось открыть мероприятия организации", show_alert=True)
+        await callback.answer("Некорректная организация", show_alert=True)
         return
 
     await state.update_data(
@@ -309,24 +373,7 @@ async def organization_events(callback: CallbackQuery, state: FSMContext) -> Non
         event_filters_applied=_empty_event_filters(),
         event_filters_draft=_empty_event_filters(),
     )
-    events_response = await _request_events_to_consumer(
-        callback.from_user.id,
-        "get_events",
-        {"filters": {"organization_id": organization_id}},
-    )
-    events = [] if not events_response or "error" in events_response else events_response.get("events", [])
-    if not events:
-        await callback.message.answer(
-            f"У организации {organization_name} пока нет мероприятий."
-        )
-        await callback.answer()
-        return
-    first_event = events[0]
-    await callback.message.answer(
-        render("event.jinja2", event=first_event),
-        reply_markup=_events_keyboard(index=0, total=len(events)),
-    )
-    await callback.answer()
+    await _show_events_page(callback, state, page=0)
 
 
 @router.callback_query(lambda c: c.data == "org_filters_open")
@@ -338,7 +385,7 @@ async def open_filters(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(lambda c: c.data == "org_filters_back_to_list")
 async def filters_back_to_list(callback: CallbackQuery, state: FSMContext) -> None:
-    await _show_organization_by_index(callback, state, index=0)
+    await _show_organizations_page(callback, state, page=0)
 
 
 @router.callback_query(lambda c: c.data == "org_filter_city_start")
@@ -478,7 +525,7 @@ async def apply_filters(callback: CallbackQuery, state: FSMContext) -> None:
         "types": list(draft.get("types", [])),
     }
     await state.update_data(organization_filters_applied=applied)
-    await _show_organization_by_index(callback, state, index=0)
+    await _show_organizations_page(callback, state, page=0)
 
 
 @router.callback_query(lambda c: c.data == "org_filters_reset")
@@ -488,4 +535,4 @@ async def reset_filters(callback: CallbackQuery, state: FSMContext) -> None:
         organization_filters_applied=empty,
         organization_filters_draft=empty,
     )
-    await _show_organization_by_index(callback, state, index=0)
+    await _show_organizations_page(callback, state, page=0)
