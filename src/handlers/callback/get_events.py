@@ -29,6 +29,7 @@ FILTER_DIRECTIONS = [
     "Поиск пропавших",
     "Образование",
 ]
+PAGE_SIZE = 4
 
 
 def _empty_filters() -> dict:
@@ -104,6 +105,31 @@ def _events_keyboard(index: int, total: int) -> InlineKeyboardMarkup:
     )
 
 
+def _events_list_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    prev_page = (page - 1) % total_pages
+    next_page = (page + 1) % total_pages
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Фильтры", callback_data="event_filters_open")],
+            [
+                InlineKeyboardButton(text="⬅️", callback_data=f"events_page_{prev_page}"),
+                InlineKeyboardButton(text="➡️", callback_data=f"events_page_{next_page}"),
+            ],
+        ]
+    )
+
+
+def _event_card_keyboard(event_id: int, page: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Назад", callback_data=f"events_page_{page}"),
+                InlineKeyboardButton(text="Участвовать", callback_data=f"participate_event_{event_id}"),
+            ]
+        ]
+    )
+
+
 def _filters_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -168,7 +194,13 @@ def _ask_more_direction_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-async def _show_event_by_index(callback: CallbackQuery, state: FSMContext, index: int) -> None:
+def _build_event_link(bot_username: str | None, event_id: int, page: int) -> str:
+    if bot_username:
+        return f"https://t.me/{bot_username}?start=event_{event_id}_{page}"
+    return "https://t.me/"
+
+
+async def _fetch_events(callback: CallbackQuery, state: FSMContext) -> list[dict] | None:
     applied, _ = await _get_filters(state)
     data = await state.get_data()
     base = data.get("event_filters_base") or {}
@@ -184,22 +216,60 @@ async def _show_event_by_index(callback: CallbackQuery, state: FSMContext, index
         callback.from_user.id, "get_events", {"filters": merged_filters}
     )
     if not response or "error" in response:
+        return None
+    return response.get("events", [])
+
+
+async def _show_events_page(callback: CallbackQuery, state: FSMContext, page: int) -> None:
+    events = await _fetch_events(callback, state)
+    if events is None:
         await callback.answer("Не удалось получить список мероприятий", show_alert=True)
         return
-
-    events = response.get("events", [])
     if not events:
         await _safe_edit_message(callback.message, "Ничего не найдено")
         await callback.answer()
         return
-
-    index = index % len(events)
-    event = events[index]
-    keyboard = _events_keyboard(index=index, total=len(events))
+    total_pages = (len(events) + PAGE_SIZE - 1) // PAGE_SIZE
+    page = page % total_pages
+    start = page * PAGE_SIZE
+    chunk = events[start:start + PAGE_SIZE]
+    me = await callback.bot.get_me()
+    bot_username = me.username
+    prepared_events = []
+    for event in chunk:
+        prepared = dict(event)
+        prepared["link"] = _build_event_link(bot_username, int(event["id"]), page)
+        prepared_events.append(prepared)
+    text = render(
+        "events_list.jinja2",
+        events=prepared_events,
+        page=page + 1,
+        total_pages=total_pages,
+        total_events=len(events),
+    )
     await _safe_edit_message(
-        callback.message, render("event.jinja2", event=event), reply_markup=keyboard
+        callback.message,
+        text,
+        reply_markup=_events_list_keyboard(page=page, total_pages=total_pages),
     )
     await callback.answer()
+
+
+async def send_event_card(message: Message, user_id: int, event_id: int, page: int = 0) -> bool:
+    response = await _request_to_consumer(user_id, "get_events", {"filters": {}})
+    if not response or "error" in response:
+        await message.answer("Не удалось получить мероприятия.")
+        return False
+    events = response.get("events", [])
+    event = next((item for item in events if int(item.get("id", -1)) == event_id), None)
+    if not event:
+        await message.answer("Мероприятие не найдено.")
+        return False
+    await message.answer(
+        render("event.jinja2", event=event),
+        reply_markup=_event_card_keyboard(event_id=event_id, page=page),
+    )
+    return True
 
 
 async def _show_filters(callback: CallbackQuery) -> None:
@@ -213,17 +283,17 @@ async def get_events(callback: CallbackQuery, state: FSMContext) -> None:
         event_filters_applied=_empty_filters(),
         event_filters_draft=_empty_filters(),
     )
-    await _show_event_by_index(callback, state, index=0)
+    await _show_events_page(callback, state, page=0)
 
 
-@router.callback_query(lambda c: c.data.startswith("events_"))
+@router.callback_query(lambda c: c.data.startswith("events_page_"))
 async def paginate_events(callback: CallbackQuery, state: FSMContext) -> None:
     try:
-        index = int(callback.data.split("_", 1)[1])
+        page = int(callback.data.rsplit("_", 1)[1])
     except (ValueError, IndexError):
-        await callback.answer("Некорректный индекс", show_alert=True)
+        await callback.answer("Некорректная страница", show_alert=True)
         return
-    await _show_event_by_index(callback, state, index=index)
+    await _show_events_page(callback, state, page=page)
 
 
 @router.callback_query(lambda c: c.data == "event_filters_open")
@@ -235,7 +305,7 @@ async def open_filters(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(lambda c: c.data == "event_filters_back_to_list")
 async def filters_back_to_list(callback: CallbackQuery, state: FSMContext) -> None:
-    await _show_event_by_index(callback, state, index=0)
+    await _show_events_page(callback, state, page=0)
 
 
 @router.callback_query(lambda c: c.data == "event_filter_city_start")
@@ -367,14 +437,14 @@ async def apply_filters(callback: CallbackQuery, state: FSMContext) -> None:
         "date_to": draft.get("date_to", ""),
     }
     await state.update_data(event_filters_applied=applied)
-    await _show_event_by_index(callback, state, index=0)
+    await _show_events_page(callback, state, page=0)
 
 
 @router.callback_query(lambda c: c.data == "event_filters_reset")
 async def reset_filters(callback: CallbackQuery, state: FSMContext) -> None:
     empty = _empty_filters()
     await state.update_data(event_filters_applied=empty, event_filters_draft=empty)
-    await _show_event_by_index(callback, state, index=0)
+    await _show_events_page(callback, state, page=0)
 
 
 @router.callback_query(
