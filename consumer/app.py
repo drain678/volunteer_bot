@@ -1,5 +1,6 @@
 import logging.config
 import asyncio
+import time
 
 import aio_pika
 import msgpack
@@ -9,7 +10,11 @@ from sqlalchemy import select
 from config.settings import settings
 from consumer.handlers.event_distribution import handle_event_distribution
 from consumer.logger import LOGGING_CONFIG, logger
-from consumer.metrics import RECEIVE_MESSAGE
+from consumer.metrics import (
+    MESSAGE_PROCESSING_SECONDS,
+    PROCESSED_MESSAGES,
+    RECEIVE_MESSAGE,
+)
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
 from src.models.models import Organization, User
@@ -77,12 +82,29 @@ async def main() -> None:
                         async with message.process():
                             RECEIVE_MESSAGE.inc()
                             body = msgpack.unpackb(message.body)
+                            action = str(body.get("action") or "unknown")
+                            start_ts = time.monotonic()
+                            status = "ok"
                             if await _is_banned_organizer_action(body):
                                 user_id = body.get("id")
                                 if user_id is not None:
                                     await _publish_guard_error(int(user_id), "organization_banned")
+                                status = "error"
+                                PROCESSED_MESSAGES.labels(action=action, status=status).inc()
+                                MESSAGE_PROCESSING_SECONDS.labels(action=action).observe(
+                                    time.monotonic() - start_ts
+                                )
                                 continue
-                            await handle_event_distribution(body)
+                            try:
+                                await handle_event_distribution(body)
+                            except Exception:
+                                status = "error"
+                                raise
+                            finally:
+                                PROCESSED_MESSAGES.labels(action=action, status=status).inc()
+                                MESSAGE_PROCESSING_SECONDS.labels(action=action).observe(
+                                    time.monotonic() - start_ts
+                                )
         except AMQPConnectionError as exc:
             logger.warning("RabbitMQ недоступен (%s), повтор через 3 сек", exc)
             await asyncio.sleep(3)
