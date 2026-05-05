@@ -172,22 +172,49 @@ async def event_city(message: Message, state: FSMContext) -> None:
         await message.answer("Город не должен быть пустым. Введи снова.")
         return
     await state.update_data(city=city)
+    await state.set_state(CreateEventState.start_date)
+    await message.answer("Дата начала? Формат: ДД.ММ.ГГГГ")
+
+
+@router.message(CreateEventState.start_date)
+async def event_start_time(message: Message, state: FSMContext) -> None:
+    start_date = (message.text or "").strip()
+    try:
+        datetime.strptime(start_date, "%d.%m.%Y")
+    except ValueError:
+        await message.answer("Неверный формат даты. Пример: 30.04.2026")
+        return
+    await state.update_data(start_date=start_date)
     await state.set_state(CreateEventState.start_time)
-    await message.answer("Дата и время начала? Формат: ДД.ММ.ГГГГ ЧЧ:ММ")
+    await message.answer("Время начала? Формат: ЧЧ:ММ")
 
 
 @router.message(CreateEventState.start_time)
-async def event_start_time(message: Message, state: FSMContext) -> None:
+async def event_start_time_value(message: Message, state: FSMContext) -> None:
     start_time = (message.text or "").strip()
     try:
-        dt = datetime.strptime(start_time, "%d.%m.%Y %H:%M")
+        datetime.strptime(start_time, "%H:%M")
     except ValueError:
-        await message.answer("Неверный формат. Пример: 30.04.2026 14:30")
+        await message.answer("Неверный формат времени. Пример: 14:30")
         return
+
+    event_data = await state.get_data()
+    start_date = event_data.get("start_date")
+    if not start_date:
+        await state.set_state(CreateEventState.start_date)
+        await message.answer("Сначала укажи дату начала. Формат: ДД.ММ.ГГГГ")
+        return
+
+    try:
+        dt = datetime.strptime(f"{start_date} {start_time}", "%d.%m.%Y %H:%M")
+    except ValueError:
+        await message.answer("Не удалось разобрать дату и время. Введи время снова в формате ЧЧ:ММ")
+        return
+
     if dt < datetime.now():
         await message.answer("Дата и время не могут быть раньше текущего момента.")
         return
-    await state.update_data(start_time=start_time)
+    await state.update_data(start_time=dt.strftime("%d.%m.%Y %H:%M"))
     await state.set_state(CreateEventState.duration_hours)
     await message.answer("Длительность в часах? Пример: 2 или 2.5")
 

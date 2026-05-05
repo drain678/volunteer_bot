@@ -6,6 +6,7 @@ class CreateEventState(StatesGroup):
     description = State()
     min_age = State()
     city = State()
+    start_date = State()
     start_time = State()
     duration_hours = State()
     category = State()
