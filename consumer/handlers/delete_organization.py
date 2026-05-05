@@ -11,7 +11,7 @@ from config.settings import settings
 from consumer.logger import LOGGING_CONFIG, logger
 from consumer.storage import rabbit
 from consumer.storage.db import async_session
-from src.models.models import Event, Organization, User
+from src.models.models import Event, Organization, Participation, User
 
 
 async def delete_organization(body: Dict[str, Any]) -> None:
@@ -26,13 +26,13 @@ async def delete_organization(body: Dict[str, Any]) -> None:
             if not user or user.role != "organizer":
                 response_body = {"error": "organization_not_found"}
             else:
+                await db.execute(delete(Participation).where(Participation.user_id == user.id))
                 await db.execute(delete(Event).where(Event.created_by == user.id))
                 await db.execute(delete(Organization).where(Organization.created_by == user.id))
-                user.role = "volunteer"
-                user.profile_filled = False
+                await db.delete(user)
                 await db.commit()
                 response_body = {"status": "deleted"}
-                logger.info("ПРОФИЛЬ ОРГАНИЗАЦИИ УДАЛЕН", extra={"body": body.get("id")})
+                logger.info("ПРОФИЛЬ ОРГАНИЗАТОРА И ПОЛЬЗОВАТЕЛЬ УДАЛЕНЫ", extra={"body": body.get("id")})
     except SQLAlchemyError:
         logger.exception("ОШИБКА УДАЛЕНИЯ ПРОФИЛЯ ОРГАНИЗАЦИИ")
         response_body = {"error": "db_error"}
