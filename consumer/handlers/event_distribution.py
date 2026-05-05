@@ -20,6 +20,7 @@ from consumer.handlers.review_participation import review_participation
 from consumer.handlers.delete_event import delete_event
 from consumer.handlers.update_profile import update_profile
 from consumer.handlers.update_organization import update_organization
+from consumer.handlers.update_event import update_event
 
 
 async def handle_event_distribution(body: Dict[str, Any]) -> None:
@@ -58,6 +59,8 @@ async def handle_event_distribution(body: Dict[str, Any]) -> None:
             await update_profile(body)
         case "update_organization":
             await update_organization(body)
+        case "update_event":
+            await update_event(body)
         case "delete_organization":
             await delete_organization(body)
 
