@@ -12,7 +12,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from consumer.logger import LOGGING_CONFIG, logger
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from config.settings import settings
 from src.handlers.callback.router import router
@@ -48,8 +48,6 @@ FILTER_TYPES = [
     "ССУЗ",
     "Школа",
 ]
-
-ADMIN_TELEGRAM_ID = 1200510460
 
 PENDING_ORGANIZATION_REQUESTS: dict[str, dict] = {}
 
@@ -174,7 +172,17 @@ async def _is_admin(telegram_id: int) -> bool:
     async with async_session() as db:
         result = await db.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
-        return bool(user and user.role == "admin")
+        return bool(user and (user.is_admin or user.role == "admin"))
+
+
+async def _get_admin_telegram_ids() -> list[int]:
+    async with async_session() as db:
+        result = await db.execute(
+            select(User.telegram_id).where(
+                or_(User.is_admin.is_(True), User.role == "admin")
+            )
+        )
+        return [row[0] for row in result.all()]
 
 
 async def _request_create_organization(profile_payload: dict) -> dict | None:
@@ -433,17 +441,19 @@ async def organization_type_pick(callback: CallbackQuery, state: FSMContext) -> 
 
     request_id = f"{callback.from_user.id}_{int(time.time())}"
     PENDING_ORGANIZATION_REQUESTS[request_id] = body
-    try:
-        await callback.bot.send_message(
-            ADMIN_TELEGRAM_ID, "Новая заявка на профиль организатора"
-        )
-        await callback.bot.send_message(
-            ADMIN_TELEGRAM_ID,
-            render("profile_organization.jinja2", user=body),
-            reply_markup=_moderation_keyboard(request_id),
-        )
-    except TelegramBadRequest:
-        pass
+    admin_ids = await _get_admin_telegram_ids()
+    for admin_id in admin_ids:
+        try:
+            await callback.bot.send_message(
+                admin_id, "Новая заявка на профиль организатора"
+            )
+            await callback.bot.send_message(
+                admin_id,
+                render("profile_organization.jinja2", user=body),
+                reply_markup=_moderation_keyboard(request_id),
+            )
+        except TelegramBadRequest:
+            continue
 
     await callback.message.answer(
         "Заявка отправлена администратору на проверку. Ожидайте решение."

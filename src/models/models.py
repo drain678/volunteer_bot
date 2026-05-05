@@ -30,6 +30,7 @@ class User(Base):
 
     # volunteer / organizer / admin
     role: Mapped[str] = mapped_column(default="volunteer")
+    is_admin: Mapped[bool] = mapped_column(default=False)
     is_blocked: Mapped[bool] = mapped_column(default=False)
 
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
@@ -53,6 +54,7 @@ class User(Base):
             "rating": self.rating,
             "profile_filled": self.profile_filled,
             "role": self.role,
+            "is_admin": self.is_admin,
             "is_blocked": self.is_blocked,
             "created_at": self.created_at.isoformat(),
         }
@@ -70,6 +72,7 @@ class Organization(Base):
     representative_name: Mapped[str] = mapped_column(nullable=True)
     representative_phone: Mapped[str] = mapped_column(nullable=True)
     website: Mapped[str] = mapped_column(nullable=True)
+    is_banned: Mapped[bool] = mapped_column(default=False)
 
     created_by: Mapped[int] = mapped_column(
         ForeignKey("public.users.id", ondelete="CASCADE")
